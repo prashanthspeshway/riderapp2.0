@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Container,
   Paper,
@@ -24,7 +24,11 @@ import {
   Grid,
   IconButton,
   Tooltip,
-  Chip
+  Chip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from "@mui/material";
 import { 
   DirectionsCar, 
@@ -43,9 +47,9 @@ import {
   DocumentScanner
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
-import { signupRider } from "../services/api";
+import { signupRider, getVehicleTypes } from "../services/api";
 
-const steps = ['Personal Info', 'PAN & Documents', 'Aadhar Details', 'License & Vehicle', 'Review & Submit'];
+const steps = ['Personal Info', 'Address & Bank Details', 'PAN & Documents', 'Aadhar Details', 'License & Vehicle', 'Review & Submit'];
 
 export default function RiderRegister() {
   const navigate = useNavigate();
@@ -58,13 +62,19 @@ export default function RiderRegister() {
     lastName: "",
     email: "",
     mobile: "",
+    address: "",
+    gender: "",
+    ifsc: "",
+    accountNumber: "",
     panNumber: "",
     aadharNumber: "",
     licenseNumber: "",
     vehicleNumber: "",
+    vehicleType: "",
   });
   
   const [docs, setDocs] = useState({
+    profilePicture: null,
     panDocument: null,
     aadharFront: null,
     aadharBack: null,
@@ -81,6 +91,21 @@ export default function RiderRegister() {
   const [currentDocType, setCurrentDocType] = useState("");
   const fileInputRef = useRef(null);
   const cameraRef = useRef(null);
+
+  const [vehicleTypes, setVehicleTypes] = useState([]);
+
+  // Load vehicle types once
+  useEffect(() => {
+    const loadTypes = async () => {
+      try {
+        const res = await getVehicleTypes();
+        setVehicleTypes(res.data?.types || []);
+      } catch (err) {
+        console.error("Failed to load vehicle types:", err);
+      }
+    };
+    loadTypes();
+  }, []);
 
   const validateFile = (file) => {
     if (!file) return false;
@@ -138,7 +163,7 @@ export default function RiderRegister() {
   };
 
   // Initialize camera when modal opens
-  React.useEffect(() => {
+  useEffect(() => {
     if (cameraOpen && cameraRef.current) {
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
@@ -172,10 +197,17 @@ export default function RiderRegister() {
       form.append("lastName", formData.lastName);
       form.append("email", formData.email);
       form.append("mobile", formData.mobile);
+      form.append("address", formData.address);
+      form.append("gender", formData.gender);
+      form.append("ifsc", formData.ifsc);
+      form.append("accountNumber", formData.accountNumber);
       form.append("panNumber", formData.panNumber);
       form.append("aadharNumber", formData.aadharNumber);
       form.append("licenseNumber", formData.licenseNumber);
       form.append("vehicleNumber", formData.vehicleNumber);
+      if (formData.vehicleType) {
+        form.append("vehicleType", formData.vehicleType);
+      }
       form.append("role", "rider");
 
       Object.keys(docs).forEach((key) => {
@@ -205,6 +237,116 @@ export default function RiderRegister() {
                 <Person color="primary" />
                 Personal Information
               </Typography>
+            </Grid>
+            
+            {/* Profile Picture Upload */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CameraAlt color="primary" />
+                Profile Picture
+              </Typography>
+              <Box sx={{ 
+                display: 'flex', 
+                flexDirection: { xs: 'column', sm: 'row' }, 
+                alignItems: 'center', 
+                gap: 3,
+                p: 3,
+                border: '2px dashed',
+                borderColor: 'success.main',
+                borderRadius: 3,
+                bgcolor: 'success.light',
+                opacity: 0.1
+              }}>
+                {/* Profile Picture Preview */}
+                <Box sx={{ 
+                  position: 'relative',
+                  width: 120,
+                  height: 120,
+                  borderRadius: '50%',
+                  overflow: 'hidden',
+                  border: '3px solid',
+                  borderColor: 'success.main',
+                  bgcolor: 'grey.100',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {docs.profilePicture ? (
+                    <img
+                      src={URL.createObjectURL(docs.profilePicture)}
+                      alt="Profile Preview"
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'cover' 
+                      }}
+                    />
+                  ) : (
+                    <Person sx={{ fontSize: 60, color: 'success.main' }} />
+                  )}
+                </Box>
+                
+                {/* Upload Buttons */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                    Upload your profile picture. This will be displayed in your dashboard.
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <Button
+                      variant="contained"
+                      component="label"
+                      startIcon={<CloudUpload />}
+                      sx={{ 
+                        bgcolor: 'success.main',
+                        borderRadius: 2,
+                        px: 3,
+                        py: 1,
+                        '&:hover': {
+                          bgcolor: 'success.dark'
+                        }
+                      }}
+                    >
+                      Upload Photo
+                      <input
+                        type="file"
+                        name="profilePicture"
+                        onChange={handleFileChange}
+                        hidden
+                        accept="image/*"
+                      />
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<CameraAlt />}
+                      onClick={() => handleCameraCapture('profilePicture')}
+                      sx={{ 
+                        borderColor: 'success.main',
+                        color: 'success.main',
+                        borderRadius: 2,
+                        px: 3,
+                        py: 1,
+                        '&:hover': {
+                          borderColor: 'success.dark',
+                          bgcolor: 'success.light'
+                        }
+                      }}
+                    >
+                      Take Photo
+                    </Button>
+                  </Box>
+                  {docs.profilePicture && (
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Chip
+                        icon={<CheckCircle />}
+                        label={docs.profilePicture.name}
+                        color="success"
+                        variant="outlined"
+                        sx={{ fontWeight: 'bold' }}
+                      />
+                    </Box>
+                  )}
+                </Box>
+              </Box>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -337,6 +479,131 @@ export default function RiderRegister() {
           <Grid container spacing={3}>
             <Grid item xs={12}>
               <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Person color="primary" />
+                Address & Bank Details
+              </Typography>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                name="address"
+                label="Address"
+                value={formData.address}
+                onChange={handleChange}
+                required
+                size={isMobile ? "small" : "medium"}
+                placeholder="Enter your residential address"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                select
+                name="gender"
+                label="Gender"
+                value={formData.gender}
+                onChange={handleChange}
+                required
+                SelectProps={{ native: true }}
+                size={isMobile ? "small" : "medium"}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              >
+                <option value="">Select Gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                name="ifsc"
+                label="Bank IFSC"
+                value={formData.ifsc}
+                onChange={handleChange}
+                required
+                size={isMobile ? "small" : "medium"}
+                placeholder="Enter IFSC code"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                name="accountNumber"
+                label="Account Number"
+                value={formData.accountNumber}
+                onChange={handleChange}
+                required
+                size={isMobile ? "small" : "medium"}
+                placeholder="Enter bank account number"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+          </Grid>
+        );
+      case 2:
+        return (
+          <Grid container spacing={3}>
+            <Grid item xs={12}>
+              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CreditCard color="primary" />
                 PAN & Document Upload
               </Typography>
@@ -427,7 +694,7 @@ export default function RiderRegister() {
             </Grid>
           </Grid>
         );
-      case 2:
+      case 3:
         return (
           <Grid container spacing={3}>
             <Grid item xs={12}>
@@ -583,7 +850,7 @@ export default function RiderRegister() {
             </Grid>
           </Grid>
         );
-      case 3:
+      case 4:
         return (
           <Grid container spacing={3}>
             <Grid item xs={12}>
@@ -651,6 +918,25 @@ export default function RiderRegister() {
                   },
                 }}
               />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth size={isMobile ? "small" : "medium"}>
+                <InputLabel id="vehicle-type-label">Vehicle Type</InputLabel>
+                <Select
+                  labelId="vehicle-type-label"
+                  id="vehicle-type"
+                  name="vehicleType"
+                  value={formData.vehicleType}
+                  label="Vehicle Type"
+                  onChange={handleChange}
+                >
+                  {vehicleTypes.map((t) => (
+                    <MenuItem key={t.code} value={t.code}>
+                      {t.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12}>
               <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
@@ -877,7 +1163,7 @@ export default function RiderRegister() {
             </Grid>
           </Grid>
         );
-      case 4:
+      case 5:
         return (
           <Grid container spacing={3}>
             <Grid item xs={12}>
@@ -891,6 +1177,14 @@ export default function RiderRegister() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 2 }}>
                   Personal Information
                 </Typography>
+                {docs.profilePicture && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+                    <Avatar
+                      src={URL.createObjectURL(docs.profilePicture)}
+                      sx={{ width: 80, height: 80, border: '2px solid', borderColor: 'success.main' }}
+                    />
+                  </Box>
+                )}
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   <strong>Name:</strong> {formData.firstName} {formData.lastName}
                 </Typography>

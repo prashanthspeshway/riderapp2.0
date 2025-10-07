@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Badge, IconButton, Tooltip } from '@mui/material';
 import { Chat } from '@mui/icons-material';
-import { io } from 'socket.io-client';
+import socket from '../services/socket';
 
 const ChatNotification = ({ ride, onChatOpen, userRole }) => {
   const [unreadCount, setUnreadCount] = useState(0);
-  const [socket, setSocket] = useState(null);
+  const [chatSocket, setChatSocket] = useState(null);
 
   useEffect(() => {
     if (ride && ride._id) {
       // Initialize socket connection
-      const newSocket = io('http://localhost:5000');
-      setSocket(newSocket);
+      const newSocket = socket;
+      setChatSocket(newSocket);
 
       // Join chat room
       const roomId = `ride_${ride._id}`;
@@ -32,7 +32,10 @@ const ChatNotification = ({ ride, onChatOpen, userRole }) => {
       loadUnreadCount();
 
       return () => {
-        newSocket.close();
+        // shared socket remains open; remove listeners for this component
+        if (newSocket && newSocket.off) {
+          newSocket.off('message');
+        }
       };
     }
   }, [ride, userRole]);
@@ -40,7 +43,8 @@ const ChatNotification = ({ ride, onChatOpen, userRole }) => {
   const loadUnreadCount = async () => {
     try {
       // Temporarily without auth header for testing
-      const response = await fetch(`http://localhost:5000/api/chat/messages/${ride._id}`);
+      const base = process.env.REACT_APP_API_BASE || process.env.REACT_APP_BACKEND_URL || (typeof window !== 'undefined' ? `http://${window.location.hostname}:5000` : 'http://localhost:5000');
+      const response = await fetch(`${base}/api/chat/messages/${ride._id}`);
       
       if (response.ok) {
         const data = await response.json();

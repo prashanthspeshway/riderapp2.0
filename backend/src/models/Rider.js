@@ -24,6 +24,33 @@ const riderSchema = new mongoose.Schema({
     unique: true,
     trim: true
   },
+  // Additional personal and bank details
+  address: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  gender: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  ifsc: {
+    type: String,
+    default: '',
+    trim: true,
+    uppercase: true
+  },
+  accountNumber: {
+    type: String,
+    default: '',
+    trim: true
+  },
+  password: {
+    type: String,
+    required: false, // Password will be set when admin approves
+    minlength: [6, "Password must be at least 6 characters"]
+  },
   panNumber: {
     type: String,
     required: true,
@@ -50,6 +77,18 @@ const riderSchema = new mongoose.Schema({
     unique: true,
     trim: true,
     uppercase: true
+  },
+  // Selected vehicle type (code from VehicleType collection)
+  vehicleType: {
+    type: String,
+    default: '',
+    trim: true,
+    lowercase: true
+  },
+  // Rider profile picture (Cloudinary URL)
+  profilePicture: {
+    type: String,
+    default: null
   },
   // Document URLs stored in Cloudinary
   documents: {
@@ -109,6 +148,24 @@ const riderSchema = new mongoose.Schema({
   rejectionReason: {
     type: String,
     default: ''
+  },
+  // Login tracking
+  loginCount: {
+    type: Number,
+    default: 0
+  },
+  lastLogin: {
+    type: Date,
+    default: null
+  },
+  // Online status
+  isOnline: {
+    type: Boolean,
+    default: false
+  },
+  isAvailable: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

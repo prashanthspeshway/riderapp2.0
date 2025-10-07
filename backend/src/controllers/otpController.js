@@ -1,5 +1,6 @@
 const Otp = require("../models/Otp");
 const User = require("../models/User");
+const Rider = require("../models/Rider");
 const jwt = require("jsonwebtoken");
 
 const generateOtp = () =>
@@ -15,25 +16,51 @@ exports.send = async (req, res) => {
         .json({ success: false, message: "Mobile is required" });
     }
 
-    let user = await User.findOne({ mobile });
+    let user = null;
+    let isOldRider = true;
     
-    // If user doesn't exist, create a new one
-    if (!user) {
-      user = new User({
-        mobile,
-        role,
-        fullName: `User ${mobile.slice(-4)}`, // Temporary name
-        approvalStatus: role === "rider" ? "pending" : "approved"
-      });
-      await user.save();
-      console.log(`✅ New user created: ${mobile} with role: ${role}`);
+    if (role === "rider") {
+      // Check Rider collection ONLY
+      user = await Rider.findOne({ mobile });
+      isOldRider = false;
+      
+      // If no rider found, return error
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Rider not found. Please register first.",
+        });
+      }
+    } else {
+      // For non-rider roles, check User collection
+      user = await User.findOne({ mobile, role });
+      
+      // If user doesn't exist, create a new one
+      if (!user) {
+        user = new User({
+          mobile,
+          email: `${mobile}@temp.com`, // Temporary email to avoid null constraint
+          role,
+          fullName: `User ${mobile.slice(-4)}`, // Temporary name
+          approvalStatus: "approved"
+        });
+        await user.save();
+        console.log(`✅ New user created: ${mobile} with role: ${role}`);
+      }
     }
 
-    if (user.role === "rider" && user.approvalStatus !== "approved") {
-      return res.status(403).json({
-        success: false,
-        message: "Rider account not approved yet",
-      });
+    // Check approval status (different field names for old vs new riders)
+    if (role === "rider") {
+      const isApproved = isOldRider ? 
+        user.approvalStatus === "approved" : 
+        user.status === "approved";
+        
+      if (!isApproved) {
+        return res.status(403).json({
+          success: false,
+          message: "Rider account not approved yet",
+        });
+      }
     }
 
     const otp = generateOtp();
@@ -83,32 +110,56 @@ exports.verify = async (req, res) => {
       return res.status(400).json({ success: false, message: "OTP expired" });
     }
 
-    let user = await User.findOne({ mobile });
+    let user = null;
+    let isOldRider = true;
     
-    // If user doesn't exist, create a new one
-    if (!user) {
-      user = new User({
-        mobile,
-        role,
-        fullName: `User ${mobile.slice(-4)}`, // Temporary name
-        approvalStatus: role === "rider" ? "pending" : "approved"
-      });
-      await user.save();
-      console.log(`✅ New user created during verification: ${mobile} with role: ${role}`);
+    if (role === "rider") {
+      // Check Rider collection ONLY
+      user = await Rider.findOne({ mobile });
+      isOldRider = false;
+      
+      // If no rider found, return error
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Rider not found. Please register first.",
+        });
+      }
+    } else {
+      // For non-rider roles, check User collection
+      user = await User.findOne({ mobile, role });
+      
+      // If user doesn't exist, create a new one
+      if (!user) {
+        user = new User({
+          mobile,
+          email: `${mobile}@temp.com`, // Temporary email to avoid null constraint
+          role,
+          fullName: `User ${mobile.slice(-4)}`, // Temporary name
+          approvalStatus: "approved"
+        });
+        await user.save();
+        console.log(`✅ New user created during verification: ${mobile} with role: ${role}`);
+      }
     }
 
+    // Update login tracking
     user.loginCount = (user.loginCount || 0) + 1;
     user.lastLogin = new Date();
     await user.save();
 
+    // Determine user role and approval status based on collection
+    const userRole = isOldRider ? user.role : "rider";
+    const approvalStatus = isOldRider ? user.approvalStatus : user.status;
+
     const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET || "secretkey",
+      { id: user._id, role: userRole },
+      process.env.JWT_SECRET || "rider_app_secret_key_2024",
       { expiresIn: "7d" }
     );
 
     console.log(
-      `✅ OTP verified for ${mobile}, role: ${user.role}, loginCount: ${user.loginCount}`
+      `✅ OTP verified for ${mobile}, role: ${userRole}, loginCount: ${user.loginCount}`
     );
 
     res.json({
@@ -116,11 +167,13 @@ exports.verify = async (req, res) => {
       token,
       user: {
         _id: user._id,
-        fullName: user.fullName,
+        fullName: isOldRider ? user.fullName : `${user.firstName} ${user.lastName}`,
         mobile: user.mobile,
         email: user.email,
-        role: user.role,
-        approvalStatus: user.approvalStatus,
+        role: userRole,
+        approvalStatus: approvalStatus,
+        // Include profile picture for navbar avatar
+        profilePicture: user.profilePicture || user.profileImage || null,
       },
     });
   } catch (err) {

@@ -13,7 +13,8 @@ import {
   Chip,
   Divider,
   ListItemIcon,
-  ListItemText
+  ListItemText,
+  Tooltip
 } from "@mui/material";
 import {
   DirectionsCar,
@@ -130,24 +131,49 @@ export default function Navbar() {
               }}
             />
             
-            <IconButton onClick={handleMenuOpen} sx={{ p: 0.5 }}>
-              <Avatar 
-                sx={{ 
-                  bgcolor: 'rgba(255,255,255,0.2)',
-                  width: 36,
-                  height: 36,
-                  fontWeight: 'bold',
-                  fontSize: '0.9rem',
-                  border: '2px solid rgba(255,255,255,0.3)',
-                  '&:hover': {
-                    bgcolor: 'rgba(255,255,255,0.3)',
-                    transform: 'scale(1.05)'
-                  }
-                }}
-              >
-                {auth?.user?.fullName?.charAt(0) || (role === "rider" ? "D" : role === "user" ? "R" : "A")}
-              </Avatar>
-            </IconButton>
+            <Tooltip title="Rider Profile Pic">
+              <IconButton onClick={handleMenuOpen} sx={{ p: 0.5 }}>
+              {(() => {
+                // Compute robust avatar source with multiple fallbacks
+                const pic = auth?.user?.profilePicture;
+                const docsPic = auth?.user?.documents?.profilePicture;
+                const avatarSrc =
+                  // string URL in profilePicture
+                  (typeof pic === 'string' && pic) ||
+                  // object with url field
+                  (pic && pic.url) ||
+                  // legacy profileImage field
+                  auth?.user?.profileImage ||
+                  // documents.profilePicture may be string or object
+                  (docsPic && (typeof docsPic === 'string' ? docsPic : docsPic.url)) ||
+                  null;
+
+                const showInitial = !avatarSrc;
+
+                return (
+                  <Avatar 
+                    src={avatarSrc || undefined}
+                    sx={{ 
+                      bgcolor: 'rgba(255,255,255,0.2)',
+                      width: 36,
+                      height: 36,
+                      fontWeight: 'bold',
+                      fontSize: '0.9rem',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      '&:hover': {
+                        bgcolor: 'rgba(255,255,255,0.3)',
+                        transform: 'scale(1.05)'
+                      }
+                    }}
+                    alt="Rider Profile Pic"
+                    aria-label="Rider Profile Pic"
+                  >
+                    {showInitial && (auth?.user?.fullName?.charAt(0) || (role === "rider" ? "D" : role === "user" ? "R" : "A"))}
+                  </Avatar>
+                );
+              })()}
+              </IconButton>
+            </Tooltip>
 
             <Menu
               anchorEl={anchorEl}

@@ -29,9 +29,6 @@ export default function OTPVerificationModal({
   ride, 
   onVerified 
 }) {
-  // Debug logging
-  console.log("🔐 OTP Modal - Ride data:", ride);
-  console.log("🔐 OTP Modal - Open state:", open);
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);

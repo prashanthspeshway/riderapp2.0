@@ -38,7 +38,9 @@ export default function RiderLogin() {
         setMessage({ type: "error", text: res.data.message });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Server error while sending OTP" });
+      const apiMsg = err?.response?.data?.message;
+      const text = apiMsg || (err?.response?.status === 404 ? "Rider not found. Please sign up first." : "Server error while sending OTP");
+      setMessage({ type: "error", text });
     } finally {
       setLoading(false);
     }
@@ -60,6 +62,8 @@ export default function RiderLogin() {
           setLoading(false);
           return;
         }
+        console.log("🔐 Rider Login - User role:", user.role);
+        console.log("🔐 Rider Login - Setting roles:", [user.role]);
         login({
           token: res.data.token,
           user,
@@ -71,7 +75,9 @@ export default function RiderLogin() {
         setMessage({ type: "error", text: res.data.message });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Server error while verifying OTP" });
+      const apiMsg = err?.response?.data?.message;
+      const text = apiMsg || "Server error while verifying OTP";
+      setMessage({ type: "error", text });
     } finally {
       setLoading(false);
     }

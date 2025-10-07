@@ -6,7 +6,9 @@ const {
   getRiderById,
   updateRiderStatus,
   deleteRider,
-  uploadMultiple
+  uploadMultiple,
+  getRiderStatus,
+  updateRiderOnlineStatus
 } = require('../controllers/rider.controller');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
@@ -14,6 +16,8 @@ const { authenticateToken, requireAdmin } = require('../middleware/auth');
 router.post('/register', uploadMultiple, registerRider);
 
 // Protected routes (require authentication)
+router.get('/status', authenticateToken, getRiderStatus); // Rider's own status
+router.put('/status', authenticateToken, updateRiderOnlineStatus); // Update rider's online status
 router.get('/', authenticateToken, requireAdmin, getAllRiders);
 router.get('/:id', authenticateToken, requireAdmin, getRiderById);
 router.put('/:id/status', authenticateToken, requireAdmin, updateRiderStatus);

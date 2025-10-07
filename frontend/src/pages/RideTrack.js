@@ -3,9 +3,9 @@ import { useParams } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { io } from "socket.io-client";
+import socket from "../services/socket";
 
-const socket = io("http://localhost:5000");
+// Shared socket instance
 
 export default function RideTrack() {
   const { id } = useParams();

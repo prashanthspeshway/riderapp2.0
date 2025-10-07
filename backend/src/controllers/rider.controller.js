@@ -75,10 +75,15 @@ const registerRider = async (req, res) => {
       lastName,
       email,
       mobile,
+      address,
+      gender,
+      ifsc,
+      accountNumber,
       panNumber,
       aadharNumber,
       licenseNumber,
-      vehicleNumber
+      vehicleNumber,
+      vehicleType
     } = req.body;
 
     // Validate required fields
@@ -119,6 +124,7 @@ const registerRider = async (req, res) => {
     // Upload documents to Cloudinary
     const documents = {};
     const uploadPromises = [];
+    let profilePictureUrl = null;
 
     if (req.files && req.files.length > 0) {
       const folder = `${email.toLowerCase().replace('@', '_at_')}_${Date.now()}`;
@@ -128,7 +134,12 @@ const registerRider = async (req, res) => {
         uploadPromises.push(
           uploadToCloudinary(file, folder)
             .then(url => {
-              documents[fieldName] = url;
+              // Store URL either in documents or top-level profilePicture
+              if (fieldName === 'profilePicture') {
+                profilePictureUrl = url;
+              } else {
+                documents[fieldName] = url;
+              }
               console.log(`✅ Uploaded ${fieldName}: ${url}`);
             })
             .catch(error => {
@@ -150,11 +161,17 @@ const registerRider = async (req, res) => {
       lastName: lastName.trim(),
       email: email.toLowerCase().trim(),
       mobile: mobile.trim(),
+      address: address ? address.trim() : '',
+      gender: gender ? gender.trim() : '',
+      ifsc: ifsc ? ifsc.toUpperCase().trim() : '',
+      accountNumber: accountNumber ? accountNumber.trim() : '',
       panNumber: panNumber.toUpperCase().trim(),
       aadharNumber: aadharNumber.trim(),
       licenseNumber: licenseNumber.toUpperCase().trim(),
       vehicleNumber: vehicleNumber.toUpperCase().trim(),
+      vehicleType: vehicleType ? String(vehicleType).toLowerCase().trim() : '',
       documents,
+      profilePicture: profilePictureUrl,
       status: 'pending'
     });
 

@@ -44,7 +44,7 @@ import {
 import axios from "axios";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { io } from "socket.io-client";
+import socket from "../../services/socket";
 import Map from "../../components/Map";
 import { useNotification } from "../../contexts/NotificationContext";
 import { getPendingRides, acceptRide, rejectRide } from "../../services/api";
@@ -76,7 +76,7 @@ const playNotificationSound = () => {
   }
 };
 
-const socket = io("http://localhost:5000");
+// Shared socket instance
 
 export default function RiderDashboard() {
   const [rides, setRides] = useState([]);

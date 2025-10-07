@@ -136,6 +136,9 @@ export const resolveSOS = (id) =>
     { headers: { Authorization: `Bearer ${getToken()}` } }
   );
 
+// --- Vehicle Types ---
+export const getVehicleTypes = () => axios.get(`${API_BASE}/api/vehicle-types`);
+
 // Create a default API instance with token handling
 const api = axios.create({
   baseURL: `${API_BASE}/api`,
@@ -178,8 +181,9 @@ const apiService = {
   getSOSAlerts,
   resolveSOS,
   getAllUsers,
+  getVehicleTypes,
   // Rider management
-  updateRiderStatus: (riderId, data) => RIDERS_API.put(`/riders/${riderId}/status`, data),
+  updateRiderStatus: (riderId, data) => ADMIN_API.put(`/riders/${riderId}/status`, data),
   // Add the default axios instance for general API calls
   get: (url, config) => api.get(url, config),
   post: (url, data, config) => api.post(url, data, config),

@@ -14,9 +14,9 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
-import { io } from "socket.io-client";
+import socket from "../services/socket";
 import MapComponent from "../components/Map";
-import { createRide } from "../services/api";
+import { createRide, getVehicleTypes } from "../services/api";
 import SimpleChatModal from "../components/SimpleChatModal";
 import ChatNotification from "../components/ChatNotification";
 import { verifyOTP } from "../services/api";
@@ -44,7 +44,7 @@ const playNotificationSound = () => {
   }
 };
 
-const socket = io("http://localhost:5000");
+// Use shared socket instance
 
 export default function Booking() {
   const theme = useTheme();
@@ -60,53 +60,7 @@ export default function Booking() {
   const [distance, setDistance] = useState(null);
   const [duration, setDuration] = useState(null);
 
-  const [rideOptions, setRideOptions] = useState([
-    { 
-      id: "bike", 
-      name: "Bike", 
-      icon: <TwoWheeler />,
-      eta: "3 min", 
-      price: "₹50.00",
-      description: "Quick and economical",
-      color: "success"
-    },
-    { 
-      id: "auto", 
-      name: "Auto", 
-      icon: <LocalTaxi />,
-      eta: "2 min", 
-      price: "₹75.00",
-      description: "Affordable and comfortable",
-      color: "warning"
-    },
-    { 
-      id: "car", 
-      name: "Car", 
-      icon: <DirectionsCar />,
-      eta: "4 min", 
-      price: "₹100.00",
-      description: "Comfortable and spacious",
-      color: "primary"
-    },
-    { 
-      id: "premium", 
-      name: "Premium", 
-      icon: <Star />,
-      eta: "5 min", 
-      price: "₹150.00",
-      description: "Luxury ride experience",
-      color: "secondary"
-    },
-    { 
-      id: "parcel", 
-      name: "Parcel", 
-      icon: <LocalShipping />,
-      eta: "—", 
-      price: "Go to Parcel Page",
-      description: "Send packages safely",
-      color: "info"
-    }
-  ]);
+  const [rideOptions, setRideOptions] = useState([]);
   const [selectedRide, setSelectedRide] = useState(null);
 
   const [lookingForRider, setLookingForRider] = useState(false);
@@ -119,6 +73,11 @@ export default function Booking() {
   const [chatOpen, setChatOpen] = useState(false);
   const [otp, setOtp] = useState("");
   const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Vehicle types fetched from backend (for future dynamic options)
+  const [vehicleTypes, setVehicleTypes] = useState([]);
+  const [typesLoading, setTypesLoading] = useState(false);
+  const [typesError, setTypesError] = useState("");
 
   const { auth } = useAuth();
   const navigate = useNavigate();
@@ -168,13 +127,9 @@ export default function Booking() {
   };
 
   const handleChat = async () => {
-    console.log("📱 Opening chat - activeRide:", activeRide);
-    console.log("📱 activeRide._id:", activeRide?._id);
-    
     let currentRide = activeRide;
     
     if (!currentRide || !currentRide._id) {
-      console.log("📱 No active ride found, trying to fetch from backend");
       currentRide = await fetchActiveRide();
       
       if (!currentRide || !currentRide._id) {
@@ -189,6 +144,28 @@ export default function Booking() {
   };
 
   const GOOGLE_API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo"; // 🔑 Replace with your real key
+
+  // Load vehicle types safely inside the component
+  useEffect(() => {
+    let isMounted = true;
+    const loadTypes = async () => {
+      try {
+        setTypesLoading(true);
+        setTypesError("");
+        const res = await getVehicleTypes();
+        if (!isMounted) return;
+        setVehicleTypes(res.data?.types || []);
+      } catch (err) {
+        console.error("Failed to load vehicle types:", err);
+        if (!isMounted) return;
+        setTypesError("Failed to load vehicle types");
+      } finally {
+        if (isMounted) setTypesLoading(false);
+      }
+    };
+    loadTypes();
+    return () => { isMounted = false; };
+  }, []);
 
   // ✅ Join socket room and listen for ride updates
   useEffect(() => {
@@ -468,7 +445,7 @@ export default function Booking() {
         drop: dropAddress,
         pickupCoords: pickup,
         dropCoords: drop,
-        rideType: selectedRide
+        rideType: mapCodeToCategory(selectedRide)
       });
       
       if (res.data.success) {
@@ -600,58 +577,105 @@ export default function Booking() {
               </Typography>
               
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
-                {rideOptions.map((opt) => (
-                  <Card 
-                    key={opt.id} 
-                    onClick={() => setSelectedRide(opt.id)}
+                {typesLoading && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={20} />
+                    <Typography variant="body2">Loading vehicle types…</Typography>
+                  </Box>
+                )}
+                {typesError && (
+                  <Alert severity="error">{typesError}</Alert>
+                )}
+
+                {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+                  const code = t.code || t.name?.toLowerCase() || "car";
+                  const color = getColorForCode(code);
+                  const icon = getIconForCode(code);
+                  const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
+                  const price = estimatePriceForCode(code, distance);
+                  const description = `${t.seats || 4} seats • ${t.ac ? 'AC' : 'Non-AC'}`;
+
+                  return (
+                    <Card
+                      key={code}
+                      onClick={() => setSelectedRide(code)}
+                      sx={{
+                        cursor: 'pointer',
+                        border: selectedRide === code ? '2px solid' : '1px solid',
+                        borderColor: selectedRide === code ? `${color}.main` : 'grey.300',
+                        transition: 'all 0.2s',
+                        '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 }
+                      }}
+                    >
+                      <CardContent sx={{ p: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                            <Avatar sx={{ bgcolor: `${color}.main`, mr: 2, width: 48, height: 48 }}>
+                              {icon}
+                            </Avatar>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                                {t.name || 'Car'}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                                {description}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                <Chip icon={<AccessTime />} label={`${etaMin} min`} size="small" variant="outlined" />
+                              </Box>
+                            </Box>
+                          </Box>
+                          <Box sx={{ textAlign: 'right' }}>
+                            <Typography variant="h6" sx={{ fontWeight: 'bold', color: `${color}.main` }}>
+                              {price}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+
+                {/* Parcel option at last */}
+                {!typesLoading && !typesError && (
+                  <Card
+                    key="parcel"
+                    onClick={() => navigate('/parcel')}
                     sx={{
-                      cursor: "pointer",
-                      border: selectedRide === opt.id ? "2px solid" : "1px solid",
-                      borderColor: selectedRide === opt.id ? `${opt.color}.main` : "grey.300",
-                      transition: "all 0.2s",
-                      "&:hover": {
-                        transform: "translateY(-2px)",
-                        boxShadow: 3
-                      }
+                      cursor: 'pointer',
+                      border: '1px solid',
+                      borderColor: 'grey.300',
+                      transition: 'all 0.2s',
+                      '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 }
                     }}
                   >
                     <CardContent sx={{ p: 2 }}>
-                      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <Box sx={{ display: "flex", alignItems: "center", flex: 1 }}>
-                          <Avatar sx={{ 
-                            bgcolor: `${opt.color}.main`, 
-                            mr: 2,
-                            width: 48,
-                            height: 48
-                          }}>
-                            {opt.icon}
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                          <Avatar sx={{ bgcolor: 'secondary.main', mr: 2, width: 48, height: 48 }}>
+                            <LocalShipping />
                           </Avatar>
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="h6" sx={{ fontWeight: "bold", mb: 0.5 }}>
-                              {opt.name}
+                            <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                              Parcel
                             </Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-                              {opt.description}
+                              Send packages and documents
                             </Typography>
                             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                              <Chip 
-                                icon={<AccessTime />} 
-                                label={opt.eta} 
-                                size="small" 
-                                variant="outlined"
-                              />
+                              <Chip icon={<AccessTime />} label="3 min" size="small" variant="outlined" />
                             </Box>
                           </Box>
                         </Box>
                         <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="h6" sx={{ fontWeight: "bold", color: `${opt.color}.main` }}>
-                            {opt.price}
+                          <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'secondary.main' }}>
+                            View
                           </Typography>
                         </Box>
                       </Box>
                     </CardContent>
                   </Card>
-                ))}
+                )}
               </Box>
 
           <Button
@@ -997,3 +1021,33 @@ export default function Booking() {
     </Container>
   );
 }
+  // 🔁 Map vehicle type code to ride category accepted by backend
+  const mapCodeToCategory = (code) => {
+    if (!code) return "car";
+    if (code.includes("bike") || code.includes("scooty")) return "bike";
+    if (code.includes("auto")) return "auto";
+    if (code.includes("car")) return "car";
+    return "car";
+  };
+
+  const getIconForCode = (code) => {
+    if (code.includes("bike") || code.includes("scooty")) return <TwoWheeler />;
+    if (code.includes("auto")) return <LocalTaxi />;
+    return <DirectionsCar />;
+  };
+
+  const getColorForCode = (code) => {
+    if (code.includes("bike") || code.includes("scooty")) return "success";
+    if (code.includes("auto")) return "warning";
+    return "primary";
+  };
+
+  const estimatePriceForCode = (code, km) => {
+    const d = km || 5;
+    if (code.includes("bike") || code.includes("scooty")) return `₹${(d * 10).toFixed(2)}`;
+    if (code.includes("auto")) return `₹${(d * 15).toFixed(2)}`;
+    if (code.includes("car_ac")) return `₹${(d * 22).toFixed(2)}`;
+    if (code.includes("car_6")) return `₹${(d * 25).toFixed(2)}`;
+    if (code.includes("car_4")) return `₹${(d * 20).toFixed(2)}`;
+    return `₹${(d * 20).toFixed(2)}`;
+  };

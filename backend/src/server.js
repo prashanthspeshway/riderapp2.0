@@ -160,8 +160,23 @@ io.on("connection", (socket) => {
 
 // === Middleware ===
 app.use(helmet());
+// Allow multiple local dev origins to avoid CORS errors when CRA runs on 3001
+const allowedOrigins = [
+  config.frontendUrl,
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001'
+];
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: (origin, callback) => {
+    // allow non-browser clients or same-origin
+    const isLocalhost = origin && /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
+    if (!origin || allowedOrigins.includes(origin) || isLocalhost) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 app.use(express.json({ limit: "10mb" }));
@@ -197,6 +212,7 @@ mongoose
     const User = require("./models/User");
     const Ride = require("./models/Ride");
     const Vehicle = require("./models/Vehicle");
+    const VehicleType = require("./models/VehicleType");
     const Payment = require("./models/Payment");
     const Otp = require("./models/Otp");
     const Parcel = require("./models/Parcel");
@@ -213,6 +229,7 @@ mongoose
         { model: User, name: "User" },
         { model: Ride, name: "Ride" },
         { model: Vehicle, name: "Vehicle" },
+        { model: VehicleType, name: "VehicleType" },
         { model: Payment, name: "Payment" },
         { model: Otp, name: "Otp" },
         { model: Parcel, name: "Parcel" },
@@ -224,6 +241,26 @@ mongoose
         }
       }
       console.log("✅ All collections checked/created");
+
+      // Seed default vehicle types if none exist
+      try {
+        const count = await VehicleType.countDocuments();
+        if (count === 0) {
+          await VehicleType.insertMany([
+            { name: 'Bike', code: 'bike', seats: 1, ac: false },
+            { name: 'Scooty', code: 'scooty', seats: 1, ac: false },
+            { name: 'Auto (3 seats)', code: 'auto_3', seats: 3, ac: false },
+            { name: 'Car (4 seats)', code: 'car_4', seats: 4, ac: false },
+            { name: 'Car with AC', code: 'car_ac', seats: 4, ac: true },
+            { name: 'Car (6 seats)', code: 'car_6', seats: 6, ac: false },
+          ]);
+          console.log('🚗 Seeded default VehicleType entries');
+        } else {
+          console.log(`🚗 VehicleType entries present: ${count}`);
+        }
+      } catch (seedErr) {
+        console.error('⚠️ VehicleType seed error:', seedErr.message);
+      }
     } catch (err) {
       console.error("⚠️ Error ensuring collections:", err.message);
     }
@@ -235,6 +272,7 @@ mongoose
 
 // === Routes ===
 app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/vehicle-types", require("./routes/vehicleType.routes"));
 app.use("/api/otp", require("./routes/otpRoutes"));
 app.use("/api/rides", require("./routes/rides.routes"));
 app.use("/api/rider", require("./routes/rider.routes"));
@@ -257,17 +295,40 @@ app.get("/api/protected", authMiddleware, (req, res) => {
   });
 });
 
-// === Serve React Frontend ===
+// === Serve React Frontend (if build exists) ===
 const frontendPath = path.join(__dirname, "../frontend/build");
-app.use(express.static(frontendPath));
-app.get("*", (req, res) => {
-  if (req.url.startsWith("/api")) {
-    return res
-      .status(404)
-      .json({ success: false, message: "API route not found" });
-  }
-  res.sendFile(path.join(frontendPath, "index.html"));
-});
+const fs = require('fs');
+
+// Only serve static files if frontend build exists
+if (fs.existsSync(frontendPath)) {
+  console.log("📁 Serving frontend build from:", frontendPath);
+  app.use(express.static(frontendPath));
+  
+  app.get("*", (req, res) => {
+    if (req.url.startsWith("/api")) {
+      return res
+        .status(404)
+        .json({ success: false, message: "API route not found" });
+    }
+    res.sendFile(path.join(frontendPath, "index.html"));
+  });
+} else {
+  console.log("⚠️ Frontend build not found, serving API only");
+  
+  // Serve API routes only
+  app.get("*", (req, res) => {
+    if (req.url.startsWith("/api")) {
+      return res
+        .status(404)
+        .json({ success: false, message: "API route not found" });
+    }
+    res.json({ 
+      message: "Backend API is running. Frontend build not found.",
+      api: "http://localhost:5000/api",
+      status: "running"
+    });
+  });
+}
 
 // === Start server ===
 server.listen(config.port, () =>

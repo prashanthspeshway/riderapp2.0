@@ -71,7 +71,6 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState({});
   const [riders, setRiders] = useState([]);
-  const [userRiders, setUserRiders] = useState([]);
   const [users, setUsers] = useState([]);
   const [rides, setRides] = useState([]);
   const [sosAlerts, setSosAlerts] = useState([]);
@@ -93,7 +92,6 @@ export default function AdminDashboard() {
       await Promise.all([
         fetchOverview(),
         fetchRiders(),
-        fetchUserRiders(),
         fetchUsers(),
         fetchRides(),
         fetchSOSAlerts()
@@ -108,12 +106,9 @@ export default function AdminDashboard() {
 
   const fetchOverview = async () => {
     try {
-      console.log('🔍 Fetching overview...');
       const response = await api.getOverview();
-      console.log('📊 Overview response:', response.data);
       if (response.data.success) {
         setOverview(response.data.data);
-        console.log('✅ Set overview data:', response.data.data);
       }
     } catch (error) {
       console.error('❌ Error fetching overview:', error);
@@ -122,34 +117,25 @@ export default function AdminDashboard() {
 
   const fetchRiders = async () => {
     try {
-      console.log('🔍 Fetching pending riders...');
-      const response = await api.getAllRiders('pending');
-      console.log('📊 Pending riders response:', response.data);
-      if (response.data.success) {
-        setRiders(response.data.riders || []);
-        console.log('✅ Set pending riders:', response.data.riders?.length || 0);
-      }
+      console.log('🔍 Fetching riders from Rider collection (approved, pending, rejected)...');
+      const [pendingRes, approvedRes, rejectedRes] = await Promise.all([
+        api.getAllRiders('pending'),
+        api.getAllRiders('approved'),
+        api.getAllRiders('rejected')
+      ]);
+      const pending = pendingRes?.data?.riders || [];
+      const approved = approvedRes?.data?.riders || [];
+      const rejected = rejectedRes?.data?.riders || [];
+      const all = [...pending, ...approved, ...rejected];
+      setRiders(all);
+      console.log('✅ Set riders (Rider collection only):', all.length);
     } catch (error) {
       console.error('❌ Error fetching riders:', error);
     }
   };
 
-  // Get pending riders from both collections
-  const getPendingRiders = () => {
-    const newRiders = riders.filter(rider => rider.status === 'pending');
-    const oldRiders = userRiders.filter(rider => rider.approvalStatus === 'pending');
-    
-    // Convert old riders to new format
-    const convertedOldRiders = oldRiders.map(rider => ({
-      ...rider,
-      firstName: rider.fullName?.split(' ')[0] || '',
-      lastName: rider.fullName?.split(' ').slice(1).join(' ') || '',
-      status: rider.approvalStatus,
-      documents: rider.documents || {}
-    }));
-    
-    return [...newRiders, ...convertedOldRiders];
-  };
+  // Get pending riders (Rider collection only)
+  const getPendingRiders = () => riders.filter(rider => rider.status === 'pending');
 
   const fetchApprovedRiders = async () => {
     try {
@@ -174,60 +160,17 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchUserRiders = async () => {
-    try {
-      const response = await api.get('/admin/user-riders');
-      if (response.data.success) {
-        setUserRiders(response.data.riders || []);
-      }
-    } catch (error) {
-      console.error('Error fetching user riders:', error);
-    }
-  };
+  // Deprecated: fetching old "user-riders" removed. Admin shows Rider collection only.
 
 
-  // Get only approved riders from both collections
-  const getApprovedRiders = () => {
-    const newRiders = riders.filter(rider => rider.status === 'approved');
-    const oldRiders = userRiders.filter(rider => rider.approvalStatus === 'approved');
-    
-    // Convert old riders to new format
-    const convertedOldRiders = oldRiders.map(rider => ({
-      ...rider,
-      firstName: rider.fullName?.split(' ')[0] || '',
-      lastName: rider.fullName?.split(' ').slice(1).join(' ') || '',
-      status: rider.approvalStatus,
-      documents: rider.documents || {}
-    }));
-    
-    return [...newRiders, ...convertedOldRiders];
-  };
+  // Get only approved riders (Rider collection only)
+  const getApprovedRiders = () => riders.filter(rider => rider.status === 'approved');
 
-  // Get rejected riders from both collections
-  const getRejectedRiders = () => {
-    const newRiders = riders.filter(rider => rider.status === 'rejected');
-    const oldRiders = userRiders.filter(rider => rider.approvalStatus === 'rejected');
-    
-    // Convert old riders to new format
-    const convertedOldRiders = oldRiders.map(rider => ({
-      ...rider,
-      firstName: rider.fullName?.split(' ')[0] || '',
-      lastName: rider.fullName?.split(' ').slice(1).join(' ') || '',
-      status: rider.approvalStatus,
-      documents: rider.documents || {}
-    }));
-    
-    return [...newRiders, ...convertedOldRiders];
-  };
+  // Get rejected riders (Rider collection only)
+  const getRejectedRiders = () => riders.filter(rider => rider.status === 'rejected');
 
-  // Get all riders from both collections (for Total Riders tab)
-  const getAllRiders = () => {
-    const approvedRiders = getApprovedRiders();
-    const pendingRiders = getPendingRiders();
-    const rejectedRiders = getRejectedRiders();
-    
-    return [...approvedRiders, ...pendingRiders, ...rejectedRiders];
-  };
+  // Get all riders (Rider collection only)
+  const getAllRiders = () => riders;
 
   // Calculate combined overview stats
   const getCombinedOverview = () => {
@@ -287,12 +230,13 @@ export default function AdminDashboard() {
         rejectionReason: selectedRider.status === 'rejected' ? rejectionReason : ''
       };
 
+      // Update Rider collection only
       await api.updateRiderStatus(selectedRider._id, updateData);
+      
       showSuccess(`Rider ${selectedRider.status} successfully`);
       setStatusDialogOpen(false);
-      // Refresh both pending and approved riders
+      // Refresh riders
       fetchRiders();
-      fetchUserRiders();
     } catch (error) {
       console.error('Error updating status:', error);
       showError('Failed to update rider status');
@@ -549,21 +493,21 @@ export default function AdminDashboard() {
               setStatusFilter={setStatusFilter}
               onViewRider={handleViewRider}
               onUpdateStatus={handleUpdateStatus}
-              onRefresh={() => { fetchRiders(); fetchUserRiders(); }}
+              onRefresh={() => { fetchRiders(); }}
             />
           )}
           {activeTab === 1 && (
             <ApprovedRidersTab
               riders={getApprovedRiders()}
               onViewRider={handleViewRider}
-              onRefresh={() => { fetchRiders(); fetchUserRiders(); }}
+              onRefresh={() => { fetchRiders(); }}
             />
           )}
           {activeTab === 2 && (
             <AllRidersTab
               riders={getAllRiders()}
               onViewRider={handleViewRider}
-              onRefresh={() => { fetchRiders(); fetchUserRiders(); }}
+              onRefresh={() => { fetchRiders(); }}
             />
           )}
           {activeTab === 3 && (
@@ -600,6 +544,14 @@ export default function AdminDashboard() {
                   <Typography variant="body2" color="text.secondary">Mobile</Typography>
                   <Typography variant="body1">{selectedRider.mobile}</Typography>
                 </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Address</Typography>
+                  <Typography variant="body1">{selectedRider.address || '—'}</Typography>
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Gender</Typography>
+                  <Typography variant="body1">{selectedRider.gender || '—'}</Typography>
+                </Box>
               </Grid>
               <Grid item xs={12} md={6}>
                 <Typography variant="h6" sx={{ mb: 2 }}>Document Information</Typography>
@@ -618,6 +570,16 @@ export default function AdminDashboard() {
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="text.secondary">Vehicle Number</Typography>
                   <Typography variant="body1">{selectedRider.vehicleNumber}</Typography>
+                </Box>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="h6" sx={{ mb: 2 }}>Bank Details</Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">IFSC</Typography>
+                  <Typography variant="body1">{selectedRider.ifsc || '—'}</Typography>
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Account Number</Typography>
+                  <Typography variant="body1">{selectedRider.accountNumber || '—'}</Typography>
                 </Box>
               </Grid>
               <Grid item xs={12}>

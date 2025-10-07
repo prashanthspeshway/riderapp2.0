@@ -246,6 +246,12 @@ router.put("/riders/:id/status", authenticateToken, requireAdmin, async (req, re
     if (status === 'approved') {
       updateData.approvedAt = new Date();
       updateData.approvedBy = 'admin-001'; // Set as string since we changed the model
+      
+      // Generate password for new riders when approved
+      const bcrypt = require('bcrypt');
+      const rawPassword = Math.random().toString(36).slice(-8);
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+      updateData.password = hashedPassword;
     }
     
     const rider = await Rider.findByIdAndUpdate(
@@ -355,6 +361,42 @@ router.put("/sos/:id/resolve", authenticateToken, requireAdmin, async (req, res)
     res.json({ success: true, message: "SOS resolved", data: sos });
   } catch (err) {
     console.error("Resolve SOS error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// 🔹 Update user rider status (for old users collection)
+router.put("/user-riders/:id/status", authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { approvalStatus, adminNotes, rejectionReason } = req.body;
+    
+    const updateData = { 
+      approvalStatus, 
+      adminNotes: adminNotes || '', 
+      rejectionReason: rejectionReason || '',
+      updatedAt: new Date()
+    };
+    
+    // Only add approvedBy and approvedAt if status is approved
+    if (approvalStatus === 'approved') {
+      updateData.approvedAt = new Date();
+      updateData.approvedBy = 'admin-001';
+    }
+    
+    const userRider = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
+    
+    if (!userRider) {
+      return res.status(404).json({ success: false, message: "User rider not found" });
+    }
+    
+    console.log("✅ Updated user rider status:", userRider._id, "to", approvalStatus);
+    res.json({ success: true, message: `User rider ${approvalStatus} successfully`, rider: userRider });
+  } catch (err) {
+    console.error("Update user rider status error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
