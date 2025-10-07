@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rider_App</title>
+  <style>
+    body { 
+      font-family: Arial, Helvetica, sans-serif; 
+      margin: 0; 
+      padding: 0; 
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    #root { min-height: 100vh; }
+    
+    /* Mobile-specific styles */
+    @media (max-width: 768px) {
+      body {
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      
+      /* Prevent zoom on input focus */
+      input, select, textarea {
+        font-size: 16px;
+      }
+      
+      /* Better touch targets */
+      button, a {
+        min-height: 44px;
+        min-width: 44px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

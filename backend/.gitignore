@@ -1,0 +1,19 @@
+
+# dependencies
+node_modules/
+
+# build
+dist/
+build/
+
+# cache
+*.cache
+.cache/
+frontend/node_modules/.cache/
+frontend/.cache
+
+# env files
+.env
+backend/.env
+*.log
+
