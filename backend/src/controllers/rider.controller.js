@@ -1,4 +1,5 @@
 const Rider = require('../models/Rider');
+const User = require('../models/User');
 const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
 
@@ -362,11 +363,110 @@ const deleteRider = async (req, res) => {
   }
 };
 
+// Get rider's own status and profile
+const getRiderStatus = async (req, res) => {
+  try {
+    const riderId = req.user._id; // From JWT token (normalized)
+    console.log('🔍 Getting rider status for ID:', riderId);
+
+    // Check Rider collection only
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found"
+      });
+    }
+
+    // Return rider data from riders collection
+    const riderData = {
+      _id: rider._id,
+      firstName: rider.firstName,
+      lastName: rider.lastName,
+      email: rider.email,
+      mobile: rider.mobile,
+      status: rider.status,
+      isOnline: rider.isOnline || false,
+      isAvailable: rider.isAvailable || false,
+      profilePicture: rider.profilePicture,
+      createdAt: rider.createdAt,
+      updatedAt: rider.updatedAt
+    };
+
+    console.log('✅ Rider status retrieved:', riderData.firstName, riderData.status);
+    res.json({
+      success: true,
+      rider: riderData
+    });
+
+  } catch (error) {
+    console.error('❌ Get rider status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get rider status',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// Update rider's online status
+const updateRiderOnlineStatus = async (req, res) => {
+  try {
+    const riderId = req.user._id; // From JWT token (normalized)
+    const { isOnline, isAvailable } = req.body;
+    
+    console.log('🔍 Updating rider online status for ID:', riderId, 'isOnline:', isOnline);
+
+    // Check Rider collection only
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found"
+      });
+    }
+
+    // Update the appropriate fields
+    if (isOnline !== undefined) {
+      rider.isOnline = isOnline;
+    }
+    if (isAvailable !== undefined) {
+      rider.isAvailable = isAvailable;
+    }
+    
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    console.log('✅ Rider online status updated:', rider.firstName || rider.fullName, 'isOnline:', rider.isOnline);
+    res.json({
+      success: true,
+      message: "Rider status updated successfully",
+      rider: {
+        _id: rider._id,
+        isOnline: rider.isOnline,
+        isAvailable: rider.isAvailable
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update rider online status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update rider online status',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   registerRider,
   getAllRiders,
   getRiderById,
   updateRiderStatus,
   deleteRider,
-  uploadMultiple
+  uploadMultiple,
+  getRiderStatus,
+  updateRiderOnlineStatus
 };

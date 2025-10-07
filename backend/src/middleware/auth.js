@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Rider = require("../models/Rider");
 require("dotenv").config();
 
 const authenticateToken = async (req, res, next) => {
@@ -44,7 +45,33 @@ const authenticateToken = async (req, res, next) => {
       };
       return next();
     }
+    // If token role is 'rider', authenticate against new Riders collection
+    if (decoded.role === 'rider') {
+      const rider = await Rider.findById(decoded.id).lean();
+      if (!rider) {
+        console.log("❌ Rider not found for ID:", decoded.id);
+        return res
+          .status(401)
+          .json({ success: false, message: "User not found" });
+      }
 
+      console.log("✅ Rider authenticated:", `${rider.firstName} ${rider.lastName}`);
+
+      req.user = {
+        id: rider._id,
+        _id: rider._id,
+        fullName: `${rider.firstName} ${rider.lastName}`,
+        mobile: rider.mobile,
+        email: rider.email,
+        role: 'rider',
+        approvalStatus: rider.status,
+        isAvailable: rider.isAvailable || false,
+        isOnline: rider.isOnline || false,
+      };
+      return next();
+    }
+
+    // Otherwise authenticate classic users collection
     const user = await User.findById(decoded.id).lean();
     if (!user) {
       console.log("❌ User not found for ID:", decoded.id);
