@@ -25,11 +25,11 @@ export default function AdminLogin() {
         });
         navigate("/admin-dashboard");
       } else {
-        setError("Invalid credentials");
+        setError(res.data?.message || "Invalid credentials");
       }
     } catch (err) {
       console.error("Admin login error:", err);
-      setError("Login failed. Check your credentials.");
+      setError(err.response?.data?.message || "Login failed. Check your credentials.");
     }
   };
 
@@ -56,6 +56,7 @@ export default function AdminLogin() {
             onChange={(e) => setUsername(e.target.value)}
             margin="normal"
             required
+            placeholder="admin"
           />
           <TextField
             fullWidth
@@ -65,6 +66,7 @@ export default function AdminLogin() {
             onChange={(e) => setPassword(e.target.value)}
             margin="normal"
             required
+            placeholder="admin123"
           />
 
           {error && (

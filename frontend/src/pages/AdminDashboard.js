@@ -532,6 +532,26 @@ export default function AdminDashboard() {
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
                 <Typography variant="h6" sx={{ mb: 2 }}>Personal Information</Typography>
+                {/* Profile Photo */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                  <Avatar
+                    src={selectedRider.profilePicture || undefined}
+                    alt={`${selectedRider.firstName || ''} ${selectedRider.lastName || ''}`}
+                    sx={{ width: 72, height: 72, border: '2px solid', borderColor: 'success.main' }}
+                  />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary">Profile Photo</Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => selectedRider.profilePicture && window.open(selectedRider.profilePicture, '_blank')}
+                      disabled={!selectedRider.profilePicture}
+                      sx={{ mt: 0.5, borderColor: 'success.main', color: 'success.main' }}
+                    >
+                      View
+                    </Button>
+                  </Box>
+                </Box>
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="text.secondary">Name</Typography>
                   <Typography variant="body1">{selectedRider.firstName} {selectedRider.lastName}</Typography>
@@ -568,8 +588,16 @@ export default function AdminDashboard() {
                   <Typography variant="body1">{selectedRider.licenseNumber}</Typography>
                 </Box>
                 <Box sx={{ mb: 2 }}>
-                  <Typography variant="body2" color="text.secondary">Vehicle Number</Typography>
-                  <Typography variant="body1">{selectedRider.vehicleNumber}</Typography>
+              <Typography variant="body2" color="text.secondary">RC Number</Typography>
+              <Typography variant="body1">{selectedRider.vehicleNumber}</Typography>
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Vehicle Make</Typography>
+                  <Typography variant="body1">{selectedRider.vehicleMake || '—'}</Typography>
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary">Vehicle Model</Typography>
+                  <Typography variant="body1">{selectedRider.vehicleModel || '—'}</Typography>
                 </Box>
                 <Divider sx={{ my: 2 }} />
                 <Typography variant="h6" sx={{ mb: 2 }}>Bank Details</Typography>

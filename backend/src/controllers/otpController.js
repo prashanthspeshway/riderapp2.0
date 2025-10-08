@@ -32,20 +32,13 @@ exports.send = async (req, res) => {
         });
       }
     } else {
-      // For non-rider roles, check User collection
+      // For non-rider roles (e.g., user), require existing signup
       user = await User.findOne({ mobile, role });
-      
-      // If user doesn't exist, create a new one
       if (!user) {
-        user = new User({
-          mobile,
-          email: `${mobile}@temp.com`, // Temporary email to avoid null constraint
-          role,
-          fullName: `User ${mobile.slice(-4)}`, // Temporary name
-          approvalStatus: "approved"
+        return res.status(404).json({
+          success: false,
+          message: "User not found. Please sign up first.",
         });
-        await user.save();
-        console.log(`✅ New user created: ${mobile} with role: ${role}`);
       }
     }
 
@@ -67,8 +60,8 @@ exports.send = async (req, res) => {
     const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
     const otpRecord = await Otp.findOneAndUpdate(
-      { mobile },
-      { otp, userId: user._id, otpExpires },
+      { mobile, role },
+      { otp, userId: user._id, otpExpires, role },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
@@ -92,7 +85,7 @@ exports.verify = async (req, res) => {
         .json({ success: false, message: "Mobile and OTP required" });
     }
 
-    const record = await Otp.findOne({ mobile });
+    const record = await Otp.findOne({ mobile, role });
     if (!record) {
       return res.status(400).json({
         success: false,
@@ -126,20 +119,13 @@ exports.verify = async (req, res) => {
         });
       }
     } else {
-      // For non-rider roles, check User collection
+      // For non-rider roles (e.g., user), require existing signup
       user = await User.findOne({ mobile, role });
-      
-      // If user doesn't exist, create a new one
       if (!user) {
-        user = new User({
-          mobile,
-          email: `${mobile}@temp.com`, // Temporary email to avoid null constraint
-          role,
-          fullName: `User ${mobile.slice(-4)}`, // Temporary name
-          approvalStatus: "approved"
+        return res.status(404).json({
+          success: false,
+          message: "User not found. Please sign up first.",
         });
-        await user.save();
-        console.log(`✅ New user created during verification: ${mobile} with role: ${role}`);
       }
     }
 

@@ -25,6 +25,7 @@ export const AuthProvider = ({ children }) => {
     setAuth({ token: null, user: null, roles: [] });
     localStorage.removeItem("auth");
     localStorage.removeItem("token"); // ✅ clear leftover from old AdminLogin
+    localStorage.removeItem("activeRideId"); // ✅ ensure trip locks are cleared
   };
 
   useEffect(() => {

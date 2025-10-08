@@ -16,6 +16,7 @@ import RiderDashboard from "./pages/dashboards/RiderDashboard";
 import DocumentUpload from "./pages/DocumentUpload";
 import Booking from "./pages/Booking";
 import RideTrack from "./pages/RideTrack";
+import TripDetails from "./pages/TripDetails";
 import History from "./pages/History";
 import Profile from "./pages/Profile";
 import Navbar from "./components/Navbar";
@@ -193,6 +194,14 @@ export default function App() {
           />
 
           {/* COMMON */}
+          <Route
+            path="/trip/:id"
+            element={
+              <ProtectedRoute>
+                <TripDetails />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/ride/:id"
             element={

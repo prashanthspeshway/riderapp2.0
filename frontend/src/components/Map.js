@@ -40,6 +40,7 @@ export default function Map({
   console.log("🗺️ Map Component - Rider Location:", riderLocation);
 
   const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
     googleMapsApiKey: apiKey,
     libraries: LIBRARIES, // ✅ Static libraries array to fix performance warning
   });

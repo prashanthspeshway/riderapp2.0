@@ -69,8 +69,11 @@ export default function RiderRegister() {
     panNumber: "",
     aadharNumber: "",
     licenseNumber: "",
-    vehicleNumber: "",
+    rcNumber: "",
     vehicleType: "",
+    vehicleMake: "",
+    vehicleModel: "",
+    emergencyContact: "",
   });
   
   const [docs, setDocs] = useState({
@@ -186,12 +189,89 @@ export default function RiderRegister() {
     setActiveStep((prevActiveStep) => prevActiveStep - 1);
   };
 
+  const [errors, setErrors] = useState({});
+
+  const validateFields = () => {
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+    const aadharRegex = /^\d{12}$/;
+    const mobileRegex = /^\d{10}$/;
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/i;
+    const accountRegex = /^\d{9,18}$/;
+    const rcRegex = /^\d{12,18}$/;
+
+    const newErrors = {};
+    if (!panRegex.test(String(formData.panNumber).toUpperCase())) newErrors.panNumber = 'Invalid PAN format';
+    if (!aadharRegex.test(String(formData.aadharNumber))) newErrors.aadharNumber = 'Aadhar must be 12 digits';
+    if (!mobileRegex.test(String(formData.mobile))) newErrors.mobile = 'Mobile must be 10 digits';
+    if (formData.emergencyContact && !mobileRegex.test(String(formData.emergencyContact))) newErrors.emergencyContact = 'Emergency contact must be 10 digits';
+    if (formData.ifsc && !ifscRegex.test(String(formData.ifsc))) newErrors.ifsc = 'Invalid IFSC code';
+    if (formData.accountNumber && !accountRegex.test(String(formData.accountNumber))) newErrors.accountNumber = 'Invalid account number';
+    if (!formData.gender) newErrors.gender = 'Please select gender';
+    if (!rcRegex.test(String(formData.rcNumber))) newErrors.rcNumber = 'RC number must be 12–18 digits';
+    if (!String(formData.vehicleMake || '').trim()) newErrors.vehicleMake = 'Vehicle make is required';
+    if (!String(formData.vehicleModel || '').trim()) newErrors.vehicleModel = 'Vehicle model is required';
+    setErrors(newErrors);
+    return { ok: Object.keys(newErrors).length === 0, errors: newErrors };
+  };
+
+  const errorLabelMap = {
+    firstName: 'First Name',
+    lastName: 'Last Name',
+    email: 'Email',
+    mobile: 'Mobile Number',
+    address: 'Address',
+    gender: 'Gender',
+    ifsc: 'Bank IFSC',
+    accountNumber: 'Account Number',
+    panNumber: 'PAN Number',
+    aadharNumber: 'Aadhar Number',
+    licenseNumber: 'License Number',
+    rcNumber: 'RC Number',
+    vehicleType: 'Vehicle Type',
+    vehicleMake: 'Vehicle Make',
+    vehicleModel: 'Vehicle Model',
+    emergencyContact: 'Emergency Contact'
+  };
+
+  const errorStepMap = {
+    firstName: 0,
+    lastName: 0,
+    email: 0,
+    mobile: 0,
+    gender: 0,
+    address: 1,
+    ifsc: 1,
+    accountNumber: 1,
+    panNumber: 2,
+    aadharNumber: 3,
+    licenseNumber: 4,
+    rcNumber: 4,
+    vehicleType: 4,
+    vehicleMake: 4,
+    vehicleModel: 4,
+    emergencyContact: 0
+  };
+
+  const buildErrorSummary = (errs) => {
+    const items = Object.keys(errs).map((key) => `${errorLabelMap[key] || key}: ${errs[key]}`);
+    return `Please correct the following fields:\n- ${items.join('\n- ')}`;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage({ type: "", text: "" });
     setLoading(true);
 
     try {
+      const { ok, errors: vErrors } = validateFields();
+      if (!ok) {
+        const firstErrorKey = Object.keys(vErrors)[0];
+        const targetStep = errorStepMap[firstErrorKey] ?? 0;
+        setActiveStep(targetStep);
+        setMessage({ type: 'error', text: buildErrorSummary(vErrors) });
+        setLoading(false);
+        return;
+      }
       const form = new FormData();
       form.append("firstName", formData.firstName);
       form.append("lastName", formData.lastName);
@@ -204,9 +284,19 @@ export default function RiderRegister() {
       form.append("panNumber", formData.panNumber);
       form.append("aadharNumber", formData.aadharNumber);
       form.append("licenseNumber", formData.licenseNumber);
-      form.append("vehicleNumber", formData.vehicleNumber);
+      // Map rcNumber to backend field vehicleNumber
+      form.append("vehicleNumber", formData.rcNumber);
       if (formData.vehicleType) {
         form.append("vehicleType", formData.vehicleType);
+      }
+      if (formData.vehicleMake) {
+        form.append("vehicleMake", formData.vehicleMake);
+      }
+      if (formData.vehicleModel) {
+        form.append("vehicleModel", formData.vehicleModel);
+      }
+      if (formData.emergencyContact) {
+        form.append("emergencyContact", formData.emergencyContact);
       }
       form.append("role", "rider");
 
@@ -448,13 +538,45 @@ export default function RiderRegister() {
                 value={formData.mobile}
                 onChange={handleChange}
                 inputProps={{ maxLength: 10 }}
-                helperText="10-digit mobile starting with 6-9"
+                error={Boolean(errors.mobile)}
+                helperText={errors.mobile || "10-digit mobile starting with 6-9"}
                 required
                 size={isMobile ? "small" : "medium"}
                 placeholder="Enter your mobile number"
                 InputProps={{
                   startAdornment: <Phone sx={{ mr: 1, color: 'success.main' }} />
                 }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            {/* Gender selection moved to Personal Info; removed from Address & Bank */}
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                type="tel"
+                name="emergencyContact"
+                label="Emergency Contact"
+                value={formData.emergencyContact}
+                onChange={handleChange}
+                inputProps={{ maxLength: 10 }}
+                error={Boolean(errors.emergencyContact)}
+                helperText={errors.emergencyContact || '10-digit contact number'}
+                size={isMobile ? 'small' : 'medium'}
+                placeholder="Enter emergency contact number"
                 sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 2,
@@ -520,6 +642,8 @@ export default function RiderRegister() {
                 onChange={handleChange}
                 required
                 SelectProps={{ native: true }}
+                error={Boolean(errors.gender)}
+                helperText={errors.gender}
                 size={isMobile ? "small" : "medium"}
                 sx={{
                   '& .MuiOutlinedInput-root': {
@@ -551,6 +675,8 @@ export default function RiderRegister() {
                 value={formData.ifsc}
                 onChange={handleChange}
                 required
+                error={Boolean(errors.ifsc)}
+                helperText={errors.ifsc || 'Format: XXXX0XXXXXX'}
                 size={isMobile ? "small" : "medium"}
                 placeholder="Enter IFSC code"
                 sx={{
@@ -578,6 +704,8 @@ export default function RiderRegister() {
                 value={formData.accountNumber}
                 onChange={handleChange}
                 required
+                error={Boolean(errors.accountNumber)}
+                helperText={errors.accountNumber || '9–18 digits'}
                 size={isMobile ? "small" : "medium"}
                 placeholder="Enter bank account number"
                 sx={{
@@ -616,6 +744,40 @@ export default function RiderRegister() {
                 value={formData.panNumber}
                 onChange={handleChange}
                 required
+                error={Boolean(errors.panNumber)}
+                helperText={errors.panNumber || 'Format: ABCDE1234F'}
+                size={isMobile ? "small" : "medium"}
+                placeholder="Enter your PAN number"
+                InputProps={{
+                  startAdornment: <CreditCard sx={{ mr: 1, color: 'success.main' }} />
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                name="panNumber"
+                label="PAN Number"
+                value={formData.panNumber}
+                onChange={handleChange}
+                required
+                error={Boolean(errors.panNumber)}
+                helperText={errors.panNumber || 'Format: ABCDE1234F'}
                 size={isMobile ? "small" : "medium"}
                 placeholder="Enter your PAN number"
                 InputProps={{
@@ -711,6 +873,8 @@ export default function RiderRegister() {
                 value={formData.aadharNumber}
                 onChange={handleChange}
                 required
+                error={Boolean(errors.aadharNumber)}
+                helperText={errors.aadharNumber || '12 digits'}
                 size={isMobile ? "small" : "medium"}
                 placeholder="Enter your Aadhar number"
                 InputProps={{
@@ -862,6 +1026,70 @@ export default function RiderRegister() {
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
+                name="vehicleMake"
+                label="Vehicle Make"
+                value={formData.vehicleMake}
+                onChange={handleChange}
+                required
+                error={Boolean(errors.vehicleMake)}
+                helperText={errors.vehicleMake || ''}
+                size={isMobile ? "small" : "medium"}
+                placeholder="e.g., Honda, Maruti, Bajaj"
+                InputProps={{
+                  startAdornment: <DirectionsCar sx={{ mr: 1, color: 'success.main' }} />
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                name="vehicleModel"
+                label="Vehicle Model"
+                value={formData.vehicleModel}
+                onChange={handleChange}
+                required
+                error={Boolean(errors.vehicleModel)}
+                helperText={errors.vehicleModel || ''}
+                size={isMobile ? "small" : "medium"}
+                placeholder="e.g., Activa 5G, Swift VXI"
+                InputProps={{
+                  startAdornment: <DirectionsCar sx={{ mr: 1, color: 'success.main' }} />
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'success.main',
+                      borderWidth: 2,
+                    },
+                  },
+                  '& .MuiInputLabel-root.Mui-focused': {
+                    color: 'success.main',
+                  },
+                }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
                 name="licenseNumber"
                 label="License Number"
                 value={formData.licenseNumber}
@@ -892,13 +1120,15 @@ export default function RiderRegister() {
             <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
-                name="vehicleNumber"
-                label="Vehicle Number"
-                value={formData.vehicleNumber}
+                name="rcNumber"
+                label="RC Number"
+                value={formData.rcNumber}
                 onChange={handleChange}
                 required
+                error={!!errors.rcNumber}
+                helperText={errors.rcNumber || ''}
                 size={isMobile ? "small" : "medium"}
-                placeholder="Enter your vehicle number"
+                placeholder="Enter your RC number"
                 InputProps={{
                   startAdornment: <DirectionsCar sx={{ mr: 1, color: 'success.main' }} />
                 }}
@@ -929,6 +1159,10 @@ export default function RiderRegister() {
                   value={formData.vehicleType}
                   label="Vehicle Type"
                   onChange={handleChange}
+                  renderValue={(value) => {
+                    const t = vehicleTypes.find((v) => v.code === value);
+                    return t ? t.name : value;
+                  }}
                 >
                   {vehicleTypes.map((t) => (
                     <MenuItem key={t.code} value={t.code}>
@@ -938,6 +1172,7 @@ export default function RiderRegister() {
                 </Select>
               </FormControl>
             </Grid>
+            {/* Preferred Vehicle removed as per latest requirements */}
             <Grid item xs={12}>
               <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
                 Upload License & Vehicle Documents
@@ -1194,6 +1429,12 @@ export default function RiderRegister() {
                 <Typography variant="body2">
                   <strong>Mobile:</strong> {formData.mobile}
                 </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Gender:</strong> {formData.gender || '—'}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Emergency Contact:</strong> {formData.emergencyContact || '—'}
+                </Typography>
               </Card>
             </Grid>
             <Grid item xs={12} md={6}>
@@ -1211,7 +1452,7 @@ export default function RiderRegister() {
                   <strong>License:</strong> {formData.licenseNumber}
                 </Typography>
                 <Typography variant="body2">
-                  <strong>Vehicle:</strong> {formData.vehicleNumber}
+                  <strong>RC Number:</strong> {formData.rcNumber}
                 </Typography>
               </Card>
             </Grid>

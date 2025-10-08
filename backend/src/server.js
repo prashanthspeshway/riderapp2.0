@@ -191,12 +191,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting middleware
+// Rate limiting middleware (safely skipped for local/dev requests)
 const rateLimit = require('express-rate-limit');
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: 500, // generous limit to reduce accidental 429s
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests from this IP, please try again later.',
+  // Always skip limiter for local/dev to avoid 429s when testing
+  skip: (req) => {
+    const origin = req.headers.origin || '';
+    const host = req.hostname || '';
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1' || /localhost|127\.0\.0\.1/.test(origin);
+    const isDev = process.env.NODE_ENV !== 'production';
+    const forceDisable = process.env.DISABLE_RATE_LIMIT === 'true';
+    return isDev || forceDisable || isLocalHost;
+  }
 });
 app.use('/api/', limiter);
 

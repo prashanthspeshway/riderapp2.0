@@ -22,7 +22,8 @@ const riderSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    match: [/^\d{10}$/, 'Invalid mobile number']
   },
   // Additional personal and bank details
   address: {
@@ -39,12 +40,14 @@ const riderSchema = new mongoose.Schema({
     type: String,
     default: '',
     trim: true,
-    uppercase: true
+    uppercase: true,
+    match: [/^[A-Z]{4}0[A-Z0-9]{6}$/i, 'Invalid IFSC code']
   },
   accountNumber: {
     type: String,
     default: '',
-    trim: true
+    trim: true,
+    match: [/^\d{9,18}$/, 'Invalid account number']
   },
   password: {
     type: String,
@@ -56,13 +59,15 @@ const riderSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true,
-    uppercase: true
+    uppercase: true,
+    match: [/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN number']
   },
   aadharNumber: {
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    match: [/^\d{12}$/, 'Invalid Aadhar number']
   },
   licenseNumber: {
     type: String,
@@ -76,7 +81,7 @@ const riderSchema = new mongoose.Schema({
     required: true,
     unique: true,
     trim: true,
-    uppercase: true
+    match: /^\d{12,18}$/
   },
   // Selected vehicle type (code from VehicleType collection)
   vehicleType: {
@@ -85,10 +90,26 @@ const riderSchema = new mongoose.Schema({
     trim: true,
     lowercase: true
   },
+  // Emergency contact number
+  emergencyContact: {
+    type: String,
+    default: '',
+    trim: true,
+    match: /^\d{10}$/
+  },
   // Rider profile picture (Cloudinary URL)
   profilePicture: {
     type: String,
     default: null
+  },
+  // Vehicle details (optional)
+  vehicleMake: {
+    type: String,
+    default: ''
+  },
+  vehicleModel: {
+    type: String,
+    default: ''
   },
   // Document URLs stored in Cloudinary
   documents: {

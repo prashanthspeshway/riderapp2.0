@@ -40,8 +40,16 @@ const getToken = () => {
 };
 
 const attachToken = (config) => {
+  // Skip attaching token ONLY for admin login and OTP API endpoints
+  const url = config?.url || "";
+  const base = config?.baseURL || "";
+  const isAdminLogin = base.includes("/api/admin") && url.startsWith("/login");
+  const isOtpApi = base.includes("/api/otp");
+  const shouldSkip = isAdminLogin || isOtpApi;
+  if (shouldSkip) return config;
   const token = getToken();
   if (token) {
+    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -54,8 +62,15 @@ RIDERS_API.interceptors.request.use(attachToken);
 
 // Response interceptor for error handling
 const handleResponseError = (error) => {
-  if (error.response?.status === 401) {
-    // Token expired or invalid
+  const status = error.response?.status;
+  const url = error.config?.url || "";
+  const base = error.config?.baseURL || "";
+  const currentPath = (typeof window !== 'undefined' && window.location?.pathname) || "";
+  const isAuthFlow = base.includes("/api/otp") || base.includes("/api/auth") || (base.includes("/api/admin") && url.startsWith("/login"));
+  const isOnLoginPage = ["/login", "/rider-login", "/admin"].includes(currentPath);
+
+  if (status === 401 && !isAuthFlow && !isOnLoginPage) {
+    // Token expired or invalid on protected routes: clear and redirect
     localStorage.removeItem('auth');
     localStorage.removeItem('token');
     window.location.href = '/login';
@@ -89,7 +104,8 @@ export const uploadRiderDocs = (riderId, docs) =>
 
 // --- ADMIN APIs ---
 export const loginAdmin = (data) => ADMIN_API.post("/login", data);
-export const getAllRiders = (status) => ADMIN_API.get(`/riders${status ? `?status=${status}` : ''}`);
+// Fix endpoint: backend exposes /api/riders under rider.routes with admin guard
+export const getAllRiders = (status) => RIDERS_API.get(`/riders${status ? `?status=${status}` : ''}`);
 export const getAllUsers = () => ADMIN_API.get("/users");
 
 export const approveRider = (id) => ADMIN_API.post(`/captain/${id}/approve`);
@@ -111,6 +127,7 @@ export const updateLocation = (data) => RIDES_API.post("/location", data);
 export const getRideById = (rideId) => RIDES_API.get(`/${rideId}`);
 export const getPendingRides = () => RIDES_API.get("/pending");
 export const getRideHistory = (params) => RIDES_API.get("/history", { params });
+export const getActiveRide = () => RIDES_API.get("/active");
 
 // --- OTP APIs ---
 export const verifyOTP = (rideId, otp) => RIDES_API.post("/verify-otp", { rideId, otp });

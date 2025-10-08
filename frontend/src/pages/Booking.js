@@ -8,18 +8,21 @@ import {
 } from "@mui/material";
 import {
   DirectionsCar, TwoWheeler, LocalTaxi, LocalShipping,
-  LocationOn, AccessTime, AttachMoney, Star, Phone, Chat
+  LocationOn, AccessTime, AttachMoney, Star, Phone, Chat,
+  AcUnit, AirportShuttle, ShoppingBag
 } from "@mui/icons-material";
+import { keyframes } from "@mui/system";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
 import socket from "../services/socket";
 import MapComponent from "../components/Map";
-import { createRide, getVehicleTypes } from "../services/api";
+import { createRide, getVehicleTypes, cancelRide } from "../services/api";
 import SimpleChatModal from "../components/SimpleChatModal";
 import ChatNotification from "../components/ChatNotification";
 import { verifyOTP } from "../services/api";
+import CancelTripModal from "../components/CancelTripModal";
 
 // Notification sound function
 const playNotificationSound = () => {
@@ -43,6 +46,13 @@ const playNotificationSound = () => {
     console.log('Could not play notification sound:', error);
   }
 };
+
+// Subtle green pulse animation for avatars (consistent brand feel)
+const pulse = keyframes`
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.4); }
+  50% { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(46, 125, 50, 0.0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.0); }
+`;
 
 // Use shared socket instance
 
@@ -82,6 +92,7 @@ export default function Booking() {
   const { auth } = useAuth();
   const navigate = useNavigate();
   const { showSuccess, showError } = useNotification();
+  const [cancelOpen, setCancelOpen] = useState(false);
 
 
   const handleCall = () => {
@@ -115,6 +126,15 @@ export default function Booking() {
           setShowDriverDetails(true);
           setAssignedRider(data.ride.captainId);
           setOtp(data.ride.otp || "");
+          const status = String(data.ride.status || '').toLowerCase();
+          const isActive = !["completed", "cancelled"].includes(status);
+          try {
+            if (isActive) {
+              localStorage.setItem('activeRideId', data.ride._id);
+            } else {
+              localStorage.removeItem('activeRideId');
+            }
+          } catch (_) {}
           return data.ride;
         }
       } else {
@@ -143,6 +163,34 @@ export default function Booking() {
     setUnreadMessages(0); // Clear unread messages when chat is opened
   };
 
+  const handleCancelRide = async (reason) => {
+    try {
+      let currentId = activeRide?._id;
+      if (!currentId) {
+        const current = await fetchActiveRide();
+        currentId = current?._id;
+      }
+      if (!currentId) {
+        showError("No active ride to cancel");
+        return;
+      }
+      const res = await cancelRide(currentId, reason);
+      if (res?.data?.success) {
+        showSuccess("Ride cancelled");
+        setCancelOpen(false);
+        setActiveRide(null);
+        setShowDriverDetails(false);
+        setAssignedRider(null);
+        try { localStorage.removeItem('activeRideId'); } catch (_) {}
+      } else {
+        showError(res?.data?.message || "Failed to cancel ride");
+      }
+    } catch (e) {
+      console.error("Cancel ride error:", e);
+      showError(e?.response?.data?.message || "Failed to cancel ride");
+    }
+  };
+
   const GOOGLE_API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo"; // 🔑 Replace with your real key
 
   // Load vehicle types safely inside the component
@@ -158,7 +206,13 @@ export default function Booking() {
       } catch (err) {
         console.error("Failed to load vehicle types:", err);
         if (!isMounted) return;
-        setTypesError("Failed to load vehicle types");
+        // Fall back to sensible defaults so booking stays usable
+        setVehicleTypes([
+          { name: 'Bike', code: 'bike', seats: 1, ac: false, active: true },
+          { name: 'Auto (3 seats)', code: 'auto', seats: 3, ac: false, active: true },
+          { name: 'Car (4 seats)', code: 'car', seats: 4, ac: false, active: true }
+        ]);
+        setTypesError("");
       } finally {
         if (isMounted) setTypesLoading(false);
       }
@@ -230,12 +284,14 @@ export default function Booking() {
         setActiveRide(null);
         setAssignedRider(null);
         setRideStatus("Ride completed! ✅");
+        try { localStorage.removeItem('activeRideId'); } catch (_) {}
       });
 
       socket.on("rideCancelled", (ride) => {
         setActiveRide(null);
         setAssignedRider(null);
         setRideStatus("Ride cancelled ❌");
+        try { localStorage.removeItem('activeRideId'); } catch (_) {}
       });
 
       return () => {
@@ -249,15 +305,43 @@ export default function Booking() {
 
   // 📍 Get current location for pickup
   useEffect(() => {
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    const resolveByBrowser = () =>
+      new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject(new Error("Geolocation not supported"));
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          (err) => reject(err),
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+        );
+      });
+
+    const resolveByIP = async () => {
+      const res = await fetch("https://ipapi.co/json/");
+      const data = await res.json();
+      if (!data || !data.latitude || !data.longitude) throw new Error("IP geolocation unavailable");
+      return { lat: Number(data.latitude), lng: Number(data.longitude) };
+    };
+
+    const initLocation = async () => {
+      try {
+        const loc = await resolveByBrowser();
         setPickup(loc);
         const addr = await getAddressFromCoords(loc.lat, loc.lng);
         setPickupAddress(addr);
-      },
-      (err) => console.error("Geolocation error:", err.message)
-    );
+      } catch (err) {
+        console.warn("Geolocation error:", err?.message || err);
+        try {
+          const loc = await resolveByIP();
+          setPickup(loc);
+          const addr = await getAddressFromCoords(loc.lat, loc.lng);
+          setPickupAddress(addr);
+        } catch (ipErr) {
+          console.error("IP geolocation fallback failed:", ipErr?.message || ipErr);
+        }
+      }
+    };
+
+    initLocation();
   }, []);
 
   // 🌍 Reverse geocode helper
@@ -553,17 +637,17 @@ export default function Booking() {
             </ListItemButton>
           ))}
 
-          {/* Vehicle Selection - Only show when no active ride */}
-          {pickup && drop && !showDriverDetails && (
+          {/* Vehicle Selection - Show after pickup (drop optional); hidden when driver assigned */}
+          {pickup && !showDriverDetails && (
             <>
-              <Typography variant="h6" sx={{ 
-                fontWeight: 'bold', 
-                mb: 2, 
-                mt: 3,
+              <Typography variant="subtitle1" sx={{ 
+                fontWeight: 700, 
+                mb: 1.5, 
+                mt: 2,
                 color: 'text.primary',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 1
+                gap: 0.75
               }}>
                 🚗 Select Vehicle Type
                 {!selectedRide && (
@@ -574,9 +658,17 @@ export default function Booking() {
                     variant="outlined"
                   />
                 )}
+                {!drop && (
+                  <Chip 
+                    label="Drop required to book"
+                    color="warning"
+                    size="small"
+                    sx={{ ml: 1 }}
+                  />
+                )}
               </Typography>
               
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
                 {typesLoading && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <CircularProgress size={20} />
@@ -604,29 +696,29 @@ export default function Booking() {
                         border: selectedRide === code ? '2px solid' : '1px solid',
                         borderColor: selectedRide === code ? `${color}.main` : 'grey.300',
                         transition: 'all 0.2s',
-                        '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 }
+                        '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
                       }}
                     >
-                      <CardContent sx={{ p: 2 }}>
+                      <CardContent sx={{ p: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                            <Avatar sx={{ bgcolor: `${color}.main`, mr: 2, width: 48, height: 48 }}>
+                            <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
                               {icon}
                             </Avatar>
                             <Box sx={{ flex: 1 }}>
-                              <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
                                 {t.name || 'Car'}
                               </Typography>
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
                                 {description}
                               </Typography>
-                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                                <Chip icon={<AccessTime />} label={`${etaMin} min`} size="small" variant="outlined" />
-                              </Box>
+                             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                               <Chip icon={<AccessTime />} label={`${etaMin} min`} size="small" variant="outlined" />
+                             </Box>
                             </Box>
                           </Box>
                           <Box sx={{ textAlign: 'right' }}>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', color: `${color}.main` }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'success.main' }}>
                               {price}
                             </Typography>
                           </Box>
@@ -646,20 +738,20 @@ export default function Booking() {
                       border: '1px solid',
                       borderColor: 'grey.300',
                       transition: 'all 0.2s',
-                      '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 }
+                      '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
                     }}
                   >
-                    <CardContent sx={{ p: 2 }}>
+                    <CardContent sx={{ p: 1 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                          <Avatar sx={{ bgcolor: 'secondary.main', mr: 2, width: 48, height: 48 }}>
-                            <LocalShipping />
+                          <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
+                            <ShoppingBag />
                           </Avatar>
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
                               Parcel
                             </Typography>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
                               Send packages and documents
                             </Typography>
                             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -668,7 +760,7 @@ export default function Booking() {
                           </Box>
                         </Box>
                         <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'secondary.main' }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'success.main' }}>
                             View
                           </Typography>
                         </Box>
@@ -681,7 +773,7 @@ export default function Booking() {
           <Button
             fullWidth
             variant="contained"
-                disabled={!selectedRide || lookingForRider}
+                disabled={!drop || !selectedRide || lookingForRider}
                 sx={{ 
                   bgcolor: selectedRide && !lookingForRider ? "black" : "grey.400", 
                   "&:hover": { bgcolor: selectedRide && !lookingForRider ? "#333" : "grey.400" }, 
@@ -693,12 +785,13 @@ export default function Booking() {
             onClick={handleFindRiders}
                 startIcon={lookingForRider ? <CircularProgress size={20} color="inherit" /> : null}
               >
-                {lookingForRider 
-                  ? "Looking for drivers..." 
-                  : selectedRide 
-                    ? "Find Riders" 
-                    : "Select Vehicle Type First"
-                }
+                {lookingForRider
+                  ? "Looking for drivers..."
+                  : !drop
+                    ? "Set drop location first"
+                    : selectedRide
+                      ? "Find Riders"
+                      : "Select Vehicle Type First"}
               </Button>
             </>
           )}
@@ -741,6 +834,13 @@ export default function Booking() {
                   </Typography>
                   <Typography variant="body2" sx={{ opacity: 0.9 }}>
                     {activeRide.captainId?.mobile || 'Contact not available'}
+                  </Typography>
+                  {/* Vehicle details for user (make, model, license) */}
+                  <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5 }}>
+                    Vehicle: {activeRide.captainId?.vehicle?.make || activeRide.captainId?.vehicleType || '—'}
+                    {activeRide.captainId?.vehicle?.model ? ` ${activeRide.captainId.vehicle.model}` : ''}
+                    {' • '}
+                    License: {activeRide.captainId?.vehicle?.registrationNumber || activeRide.captainId?.vehicle?.plate || activeRide.captainId?.vehicleNumber || activeRide?.vehicleNumber || '—'}
                   </Typography>
                 </Box>
               </Box>
@@ -965,7 +1065,10 @@ export default function Booking() {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                     <Typography variant="body2" color="text.secondary">Vehicle</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      {assignedRider.vehicle?.type || 'Car'} ({assignedRider.vehicle?.plate || 'ABC-1234'})
+                      {(assignedRider.vehicle?.make || assignedRider.vehicleType || '—')}
+                      {assignedRider.vehicle?.model ? ` ${assignedRider.vehicle.model}` : ''}
+                      {' • '}
+                      {(assignedRider.vehicle?.registrationNumber || assignedRider.vehicle?.plate || assignedRider.vehicleNumber || '—')}
                     </Typography>
                   </Box>
 
@@ -1005,6 +1108,14 @@ export default function Booking() {
                 >
                   Chat
                 </Button>
+                <Button 
+                  variant="outlined" 
+                  color="error"
+                  sx={{ flex: 1, py: 1.5 }}
+                  onClick={() => setCancelOpen(true)}
+                >
+                  Cancel
+                </Button>
               </Box>
 
               <Alert severity="info" sx={{ borderRadius: 2 }}>
@@ -1017,6 +1128,12 @@ export default function Booking() {
           )}
         </Box>
       </Drawer>
+
+      <CancelTripModal
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        onConfirm={handleCancelRide}
+      />
 
     </Container>
   );
@@ -1031,15 +1148,24 @@ export default function Booking() {
   };
 
   const getIconForCode = (code) => {
-    if (code.includes("bike") || code.includes("scooty")) return <TwoWheeler />;
-    if (code.includes("auto")) return <LocalTaxi />;
+    const lower = (code || '').toLowerCase();
+    if (lower.includes('parcel')) return <ShoppingBag />;
+    if (lower.includes('bike') || lower.includes('scooty')) return <TwoWheeler />;
+    if (lower.includes('auto')) return <LocalTaxi />;
+    if (lower.includes('car_6') || lower.includes('station')) return <AirportShuttle />;
+    if (lower.includes('car_ac') || lower.includes('snow')) {
+      return (
+        <Box sx={{ position: 'relative' }}>
+          <DirectionsCar />
+          <AcUnit sx={{ position: 'absolute', right: -6, top: -4, fontSize: 14 }} />
+        </Box>
+      );
+    }
     return <DirectionsCar />;
   };
 
   const getColorForCode = (code) => {
-    if (code.includes("bike") || code.includes("scooty")) return "success";
-    if (code.includes("auto")) return "warning";
-    return "primary";
+    return "success";
   };
 
   const estimatePriceForCode = (code, km) => {

@@ -77,21 +77,57 @@ const registerRider = async (req, res) => {
       mobile,
       address,
       gender,
+      emergencyContact,
       ifsc,
       accountNumber,
       panNumber,
       aadharNumber,
       licenseNumber,
       vehicleNumber,
-      vehicleType
+      rcNumber,
+      vehicleType,
+      vehicleMake,
+      vehicleModel
     } = req.body;
 
+    const normalizedRc = (rcNumber || vehicleNumber || '').trim();
+
     // Validate required fields
-    if (!firstName || !lastName || !email || !mobile || !panNumber || !aadharNumber || !licenseNumber || !vehicleNumber) {
+    if (!firstName || !lastName || !email || !mobile || !panNumber || !aadharNumber || !licenseNumber || !normalizedRc) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required'
       });
+    }
+
+    // Format validations
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+    const aadharRegex = /^\d{12}$/;
+    const mobileRegex = /^\d{10}$/;
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/i;
+    const accountRegex = /^\d{9,18}$/;
+    const rcRegex = /^\d{12,18}$/;
+
+    if (!panRegex.test(String(panNumber).toUpperCase())) {
+      return res.status(400).json({ success: false, message: 'Invalid PAN number format' });
+    }
+    if (!aadharRegex.test(String(aadharNumber))) {
+      return res.status(400).json({ success: false, message: 'Invalid Aadhar number format' });
+    }
+    if (!mobileRegex.test(String(mobile))) {
+      return res.status(400).json({ success: false, message: 'Invalid mobile number format' });
+    }
+    if (emergencyContact && !/^\d{10}$/.test(String(emergencyContact))) {
+      return res.status(400).json({ success: false, message: 'Invalid emergency contact format' });
+    }
+    if (ifsc && !ifscRegex.test(String(ifsc))) {
+      return res.status(400).json({ success: false, message: 'Invalid IFSC code format' });
+    }
+    if (accountNumber && !accountRegex.test(String(accountNumber))) {
+      return res.status(400).json({ success: false, message: 'Invalid account number format' });
+    }
+    if (!rcRegex.test(String(normalizedRc))) {
+      return res.status(400).json({ success: false, message: 'RC number must be 12–18 digits' });
     }
 
     // Check if rider already exists
@@ -102,7 +138,7 @@ const registerRider = async (req, res) => {
         { panNumber: panNumber.toUpperCase() },
         { aadharNumber },
         { licenseNumber: licenseNumber.toUpperCase() },
-        { vehicleNumber: vehicleNumber.toUpperCase() }
+        { vehicleNumber: normalizedRc }
       ]
     });
 
@@ -113,7 +149,7 @@ const registerRider = async (req, res) => {
       else if (existingRider.panNumber === panNumber.toUpperCase()) conflictField = 'PAN Number';
       else if (existingRider.aadharNumber === aadharNumber) conflictField = 'Aadhar Number';
       else if (existingRider.licenseNumber === licenseNumber.toUpperCase()) conflictField = 'License Number';
-      else if (existingRider.vehicleNumber === vehicleNumber.toUpperCase()) conflictField = 'Vehicle Number';
+      else if (existingRider.vehicleNumber === normalizedRc) conflictField = 'RC Number';
 
       return res.status(400).json({
         success: false,
@@ -163,13 +199,16 @@ const registerRider = async (req, res) => {
       mobile: mobile.trim(),
       address: address ? address.trim() : '',
       gender: gender ? gender.trim() : '',
+      emergencyContact: emergencyContact ? String(emergencyContact).trim() : '',
       ifsc: ifsc ? ifsc.toUpperCase().trim() : '',
       accountNumber: accountNumber ? accountNumber.trim() : '',
       panNumber: panNumber.toUpperCase().trim(),
       aadharNumber: aadharNumber.trim(),
       licenseNumber: licenseNumber.toUpperCase().trim(),
-      vehicleNumber: vehicleNumber.toUpperCase().trim(),
+      vehicleNumber: normalizedRc,
       vehicleType: vehicleType ? String(vehicleType).toLowerCase().trim() : '',
+      vehicleMake: vehicleMake ? vehicleMake.trim() : '',
+      vehicleModel: vehicleModel ? vehicleModel.trim() : '',
       documents,
       profilePicture: profilePictureUrl,
       status: 'pending'

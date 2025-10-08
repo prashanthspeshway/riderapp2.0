@@ -424,19 +424,19 @@ export default function RiderDashboard() {
 
   const handleStartRide = async (rideId) => {
     try {
-      const response = await axios.put(
-        `http://localhost:5000/api/rides/${rideId}/start`,
-        {},
-        { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
-      );
+      // Use the API helper (POST) with auth interceptor
+      const response = await startRide(rideId);
       
-      if (response.data.success) {
+      if (response.data?.success) {
         showSuccess("Ride started!");
         socket.emit("rideStarted", { rideId, riderId: auth?.user?._id });
+      } else {
+        showError(response.data?.message || "Failed to start ride");
       }
     } catch (error) {
       console.error("Error starting ride:", error);
-      showError("Failed to start ride");
+      const msg = error.response?.data?.message || error.message || "Failed to start ride";
+      showError(msg);
     }
   };
 
