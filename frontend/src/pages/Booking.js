@@ -18,7 +18,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
 import socket from "../services/socket";
 import MapComponent from "../components/Map";
-import { createRide, getVehicleTypes, cancelRide } from "../services/api";
+import { createRide, getVehicleTypes, cancelRide, getActiveRide } from "../services/api";
 import SimpleChatModal from "../components/SimpleChatModal";
 import ChatNotification from "../components/ChatNotification";
 import { verifyOTP } from "../services/api";
@@ -105,40 +105,26 @@ export default function Booking() {
 
   const fetchActiveRide = async () => {
     try {
-      const token = auth?.token || localStorage.getItem('token');
-      if (!token) {
-        console.error("📱 No token available for fetching active ride");
-        return null;
-      }
-
-      const response = await fetch('http://localhost:5000/api/rides/active', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.ride) {
-          console.log("📱 Fetched active ride:", data.ride);
-          setActiveRide(data.ride);
-          setShowDriverDetails(true);
-          setAssignedRider(data.ride.captainId);
-          setOtp(data.ride.otp || "");
-          const status = String(data.ride.status || '').toLowerCase();
-          const isActive = !["completed", "cancelled"].includes(status);
-          try {
-            if (isActive) {
-              localStorage.setItem('activeRideId', data.ride._id);
-            } else {
-              localStorage.removeItem('activeRideId');
-            }
-          } catch (_) {}
-          return data.ride;
-        }
+      const res = await getActiveRide();
+      const data = res?.data;
+      if (data?.success && data?.ride) {
+        console.log("📱 Fetched active ride:", data.ride);
+        setActiveRide(data.ride);
+        setShowDriverDetails(true);
+        setAssignedRider(data.ride.captainId);
+        setOtp(data.ride.otp || "");
+        const status = String(data.ride.status || '').toLowerCase();
+        const isActive = !["completed", "cancelled"].includes(status);
+        try {
+          if (isActive) {
+            localStorage.setItem('activeRideId', data.ride._id);
+          } else {
+            localStorage.removeItem('activeRideId');
+          }
+        } catch (_) {}
+        return data.ride;
       } else {
-        console.error("📱 Failed to fetch active ride:", response.status, response.statusText);
+        console.error("📱 Failed to fetch active ride:", data?.message || res?.status);
       }
     } catch (error) {
       console.error("📱 Error fetching active ride:", error);

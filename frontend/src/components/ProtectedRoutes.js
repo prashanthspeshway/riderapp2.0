@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { getActiveRide, getRideById } from "../services/api";
@@ -11,8 +11,10 @@ export default function ProtectedRoute({ children, role }) {
   const [activeRideId, setActiveRideId] = useState(() => localStorage.getItem("activeRideId"));
   const isRider = roles.includes("rider");
   const isAdmin = roles.includes("admin");
+  // Debounce reference must be defined at top-level (not inside effects)
+  const lastVerifyRef = useRef(0);
 
-  // On mount, check server if no local lock
+  // On mount or token change, check server if no local lock
   useEffect(() => {
     let mounted = true;
     const checkActive = async () => {
@@ -47,7 +49,7 @@ export default function ProtectedRoute({ children, role }) {
     };
     checkActive();
     return () => { mounted = false; };
-  }, [token, activeRideId]);
+  }, [token]);
 
   // Verify any existing local lock on navigation; clear it if ride is completed/cancelled
   useEffect(() => {
@@ -62,6 +64,12 @@ export default function ProtectedRoute({ children, role }) {
           }
           return;
         }
+        // Only verify when we actually have a lock
+        if (!activeRideId) return;
+        // Debounce successive verifications
+        const now = Date.now();
+        if (now - lastVerifyRef.current < 1500) return;
+        lastVerifyRef.current = now;
         const id = localStorage.getItem("activeRideId");
         // If localStorage no longer has a lock, ensure state reflects that
         if (!id) {
@@ -99,7 +107,7 @@ export default function ProtectedRoute({ children, role }) {
     };
     verifyLock();
     return () => { mounted = false; };
-  }, [location.pathname, activeRideId, isRider]);
+  }, [location.pathname, isRider]);
 
   if (!token) {
     return <Navigate to="/login" replace />;
