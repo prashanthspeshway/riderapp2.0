@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Container, Paper, Typography, TextField, Box,
   Button, Drawer, CircularProgress, ListItemButton,
@@ -83,6 +83,13 @@ export default function Booking() {
   const [chatOpen, setChatOpen] = useState(false);
   const [otp, setOtp] = useState("");
   const [unreadMessages, setUnreadMessages] = useState(0);
+  // Mobile bottom sheet snap height (half -> full)
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  // Control bottom sheet visibility (hide on backdrop tap)
+  const [bottomSheetVisible, setBottomSheetVisible] = useState(true);
+  // Refs to pickup/drop inputs for quick editing
+  const pickupInputRef = useRef(null);
+  const dropInputRef = useRef(null);
 
   // Vehicle types fetched from backend (for future dynamic options)
   const [vehicleTypes, setVehicleTypes] = useState([]);
@@ -194,9 +201,12 @@ export default function Booking() {
         if (!isMounted) return;
         // Fall back to sensible defaults so booking stays usable
         setVehicleTypes([
-          { name: 'Bike', code: 'bike', seats: 1, ac: false, active: true },
-          { name: 'Auto (3 seats)', code: 'auto', seats: 3, ac: false, active: true },
-          { name: 'Car (4 seats)', code: 'car', seats: 4, ac: false, active: true }
+          { name: 'Scooty', code: 'scooty', seats: 1, ac: false, active: true },
+          { name: 'Uber Bike', code: 'bike', seats: 1, ac: false, active: true },
+          { name: 'Auto', code: 'auto', seats: 3, ac: false, active: true },
+          { name: 'Go Sedan (4 seats)', code: 'car_4', seats: 4, ac: false, active: true },
+          { name: 'Uber Go AC', code: 'car_ac', seats: 4, ac: true, active: true },
+          { name: 'XL (6 seats)', code: 'car_6', seats: 6, ac: false, active: true }
         ]);
         setTypesError("");
       } finally {
@@ -568,20 +578,29 @@ export default function Booking() {
         }}>
           <Typography variant={isMobile ? "body1" : "h6"} sx={{ 
             mb: { xs: 1.5, md: 2 },
-            fontWeight: 'bold'
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
           }}>
+            Uber
+            <Chip label="User" size="small" sx={{ ml: 0.5 }} />
+          </Typography>
+
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
             Find a trip
           </Typography>
 
           {/* ✅ Mobile-First Pickup Input with Suggestions */}
           <TextField
             fullWidth
-            label="Pickup Address"
+            label="Pick-up location"
             value={pickupAddress}
             onChange={(e) => {
               setPickupAddress(e.target.value);
               fetchSuggestions(e.target.value, setPickupSuggestions, pickup);
             }}
+            inputRef={pickupInputRef}
             sx={{ 
               mb: 1,
               '& .MuiInputBase-input': {
@@ -601,12 +620,13 @@ export default function Booking() {
           {/* ✅ Mobile-First Drop Input with Suggestions */}
           <TextField
             fullWidth
-            label="Drop Address"
+            label="Drop-off location"
             value={dropAddress}
             onChange={(e) => {
               setDropAddress(e.target.value);
               fetchSuggestions(e.target.value, setDropSuggestions, pickup);
             }}
+            inputRef={dropInputRef}
             sx={{ 
               mb: 1,
               '& .MuiInputBase-input': {
@@ -623,8 +643,8 @@ export default function Booking() {
             </ListItemButton>
           ))}
 
-          {/* Vehicle Selection - Show after pickup (drop optional); hidden when driver assigned */}
-          {pickup && !showDriverDetails && (
+          {/* Vehicle Selection - Desktop: show inline after drop; Mobile handled by bottom sheet */}
+          {drop && !showDriverDetails && !isMobile && (
             <>
               <Typography variant="subtitle1" sx={{ 
                 fontWeight: 700, 
@@ -635,7 +655,7 @@ export default function Booking() {
                 alignItems: 'center',
                 gap: 0.75
               }}>
-                🚗 Select Vehicle Type
+                🚗 Choose a ride
                 {!selectedRide && (
                   <Chip 
                     label="Required" 
@@ -644,16 +664,14 @@ export default function Booking() {
                     variant="outlined"
                   />
                 )}
-                {!drop && (
-                  <Chip 
-                    label="Drop required to book"
-                    color="warning"
-                    size="small"
-                    sx={{ ml: 1 }}
-                  />
-                )}
               </Typography>
               
+              {/* Uber-style section header */}
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Economy</Typography>
+                <Typography variant="caption" color="text.secondary">quality drivers</Typography>
+              </Box>
+
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 1.5 }}>
                 {typesLoading && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -680,7 +698,7 @@ export default function Booking() {
                       sx={{
                         cursor: 'pointer',
                         border: selectedRide === code ? '2px solid' : '1px solid',
-                        borderColor: selectedRide === code ? `${color}.main` : 'grey.300',
+                        borderColor: selectedRide === code ? 'black' : 'grey.300',
                         transition: 'all 0.2s',
                         '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
                       }}
@@ -704,7 +722,7 @@ export default function Booking() {
                             </Box>
                           </Box>
                           <Box sx={{ textAlign: 'right' }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'success.main' }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
                               {price}
                             </Typography>
                           </Box>
@@ -776,7 +794,7 @@ export default function Booking() {
                   : !drop
                     ? "Set drop location first"
                     : selectedRide
-                      ? "Find Riders"
+                      ? `Request ${displayNameForCode(selectedRide)}`
                       : "Select Vehicle Type First"}
               </Button>
             </>
@@ -917,7 +935,7 @@ export default function Booking() {
           )}
 
 
-          {(!pickup || !drop) && (
+          {(!pickup || !drop) && !isMobile && (
             <Box sx={{ 
               mt: 3, 
               p: 3, 
@@ -991,6 +1009,225 @@ export default function Booking() {
         </div>
       )}
 
+      
+      {/* Mobile bottom sheet: pops from below after drop is set */}
+      <Drawer
+        anchor="bottom"
+        open={Boolean(isMobile && drop && !showDriverDetails && bottomSheetVisible)}
+        onClose={(e, reason) => {
+          // Collapse to regular size on backdrop or escape
+          if (reason === 'backdropClick' || reason === 'escapeKeyDown') {
+            setSheetExpanded(false);
+            setBottomSheetVisible(false);
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
+          }
+        }}
+        PaperProps={{
+          sx: {
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+            boxShadow: 6,
+            height: sheetExpanded ? '85vh' : '35vh',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            transition: 'height 0.2s ease'
+          }
+        }}
+      >
+        {/* drag handle / tap area */}
+        <Box
+          sx={{ display: 'flex', justifyContent: 'center', pt: 1, cursor: 'pointer' }}
+          onClick={() => setSheetExpanded(prev => !prev)}
+        >
+          <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'grey.400' }} />
+        </Box>
+        <Box
+          sx={{ p: 2, pt: 1, overflowY: 'auto', flex: 1 }}
+          onScroll={(e) => {
+            try {
+              const top = e.currentTarget.scrollTop;
+              if (top > 24 && !sheetExpanded) setSheetExpanded(true);
+            } catch (_) {}
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, mb: 1 }}>
+            <Typography
+              variant="subtitle1"
+              component="div"
+              sx={{ fontWeight: 700, cursor: sheetExpanded ? 'pointer' : 'default' }}
+              onClick={() => { if (sheetExpanded) setSheetExpanded(false); }}
+            >
+              Choose a ride
+            </Typography>
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => {
+                setSheetExpanded(false);
+                setBottomSheetVisible(false);
+                try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
+                // Focus drop input for quick edits
+                try { dropInputRef.current?.focus(); } catch (_) {}
+              }}
+            >
+              Edit locations
+            </Button>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
+            <Chip label="Pick up now" size="small" variant="outlined" />
+            <Chip label="For me" size="small" variant="outlined" />
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Economy</Typography>
+            <Typography variant="caption" color="text.secondary">quality drivers</Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {typesLoading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={20} />
+                <Typography variant="body2">Loading vehicle types…</Typography>
+              </Box>
+            )}
+            {typesError && (
+              <Alert severity="error">{typesError}</Alert>
+            )}
+
+            {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+              const code = t.code || t.name?.toLowerCase() || "car";
+              const icon = getIconForCode(code);
+              const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
+              const price = estimatePriceForCode(code, distance);
+              const description = `${t.seats || 4} seats • ${t.ac ? 'AC' : 'Non-AC'}`;
+
+              return (
+                <Card
+                  key={`m-${code}`}
+                  onClick={() => setSelectedRide(code)}
+                  sx={{
+                    cursor: 'pointer',
+                    border: selectedRide === code ? '2px solid' : '1px solid',
+                    borderColor: selectedRide === code ? 'black' : 'grey.300',
+                    transition: 'all 0.2s',
+                    '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                  }}
+                >
+                  <CardContent sx={{ p: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                        <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
+                          {icon}
+                        </Avatar>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                            {t.name || 'Car'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
+                            {description}
+                          </Typography>
+                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                            <Chip icon={<AccessTime />} label={`${etaMin} min`} size="small" variant="outlined" />
+                          </Box>
+                        </Box>
+                      </Box>
+                      <Box sx={{ textAlign: 'right' }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                          {price}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </CardContent>
+                </Card>
+              );
+            })}
+
+            {!typesLoading && !typesError && (
+              <Card
+                key="m-parcel"
+                onClick={() => navigate('/parcel')}
+                sx={{
+                  cursor: 'pointer',
+                  border: '1px solid',
+                  borderColor: 'grey.300',
+                  transition: 'all 0.2s',
+                  '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                }}
+              >
+                <CardContent sx={{ p: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                      <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
+                        <ShoppingBag />
+                      </Avatar>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                          Parcel
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
+                          Send packages and documents
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <Chip icon={<AccessTime />} label="3 min" size="small" variant="outlined" />
+                        </Box>
+                      </Box>
+                    </Box>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                        View
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            )}
+          </Box>
+
+          {/* Payment method - Cash (for future use) */}
+          <Box sx={{ mt: 1 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>Payment</Typography>
+            <Card sx={{ border: '1px solid', borderColor: 'grey.300' }}>
+              <CardContent sx={{ p: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Avatar sx={{ bgcolor: 'success.main', width: 32, height: 32 }}>
+                      <AttachMoney />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>Cash</Typography>
+                      <Typography variant="caption" color="text.secondary">Pay with cash</Typography>
+                    </Box>
+                  </Box>
+                  <Chip label="Default" size="small" variant="outlined" />
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+
+          <Button
+            fullWidth
+            variant="contained"
+            disabled={!drop || !selectedRide || lookingForRider}
+            sx={{
+              bgcolor: selectedRide && !lookingForRider ? 'black' : 'grey.400',
+              '&:hover': { bgcolor: selectedRide && !lookingForRider ? '#333' : 'grey.400' },
+              mt: 2,
+              py: 1.5
+            }}
+            onClick={handleFindRiders}
+            startIcon={lookingForRider ? <CircularProgress size={20} color="inherit" /> : null}
+          >
+            {lookingForRider
+              ? 'Looking for drivers...'
+              : !drop
+                ? 'Set drop location first'
+                : selectedRide
+                  ? `Request ${displayNameForCode(selectedRide)}`
+                  : 'Select Vehicle Type First'}
+          </Button>
+        </Box>
+      </Drawer>
 
       {/* Rider details drawer */}
       <Drawer 
@@ -1163,3 +1400,15 @@ export default function Booking() {
     if (code.includes("car_4")) return `₹${(d * 20).toFixed(2)}`;
     return `₹${(d * 20).toFixed(2)}`;
   };
+
+  // Display name for button label
+  const displayNameForCode = (code) => {
+    const lower = (code || '').toLowerCase();
+    if (lower.includes('bike') || lower.includes('scooty')) return 'Uber Bike';
+    if (lower.includes('auto')) return 'Uber Auto';
+    if (lower.includes('car_6')) return 'XL';
+    if (lower.includes('car_ac')) return 'Uber Go AC';
+    if (lower.includes('car') || lower.includes('car_4')) return 'Uber Go';
+    return 'Ride';
+  };
+      {/* Mobile bottom sheet: pops from below after drop is set */}

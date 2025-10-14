@@ -1,6 +1,17 @@
 import axios from "axios";
 
-const API_BASE = "http://localhost:5000"; // dev URL
+// Resolve API base dynamically to avoid hardcoded environments
+function resolveApiBase() {
+  const envBase = process.env.REACT_APP_API_BASE || process.env.REACT_APP_BACKEND_URL;
+  if (envBase) return envBase;
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location;
+    return `http://${hostname}:5000`;
+  }
+  return "http://localhost:5000";
+}
+
+const API_BASE = resolveApiBase();
 
 const AUTH_API = axios.create({
   baseURL: `${API_BASE}/api/auth`,
