@@ -87,6 +87,14 @@ export default function Booking() {
   const [sheetExpanded, setSheetExpanded] = useState(false);
   // Control bottom sheet visibility (hide on backdrop tap)
   const [bottomSheetVisible, setBottomSheetVisible] = useState(true);
+
+  // Auto re-open bottom sheet when pickup/drop are set on mobile and not in driver details
+  useEffect(() => {
+    if (isMobile && drop && !showDriverDetails) {
+      setBottomSheetVisible(true);
+      setSheetExpanded(false);
+    }
+  }, [isMobile, drop, pickup, showDriverDetails]);
   // Refs to pickup/drop inputs for quick editing
   const pickupInputRef = useRef(null);
   const dropInputRef = useRef(null);
@@ -642,6 +650,20 @@ export default function Booking() {
               {s.description}
             </ListItemButton>
           ))}
+
+          {isMobile && drop && !showDriverDetails && !bottomSheetVisible && (
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                setBottomSheetVisible(true);
+                setSheetExpanded(false);
+              }}
+              sx={{ mt: 1 }}
+            >
+              Show ride options
+            </Button>
+          )}
 
           {/* Vehicle Selection - Desktop: show inline after drop; Mobile handled by bottom sheet */}
           {drop && !showDriverDetails && !isMobile && (
