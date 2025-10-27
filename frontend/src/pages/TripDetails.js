@@ -13,6 +13,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
 import { getRideById, cancelRide } from "../services/api";
 import CancelTripModal from "../components/CancelTripModal";
+import RiderMobileMenu from "../components/RiderMobileMenu";
 
 export default function TripDetails() {
   const { id } = useParams();
@@ -77,8 +78,12 @@ export default function TripDetails() {
   }
 
   return (
-    <Container maxWidth="md">
-      <Paper sx={{ mt: 4, p: 3, borderRadius: 2 }}>
+    <>
+      {/* Mobile Menu for Riders */}
+      {Array.isArray(auth?.roles) && auth.roles.includes("rider") && <RiderMobileMenu />}
+      
+      <Container maxWidth="md">
+        <Paper sx={{ mt: 4, p: 3, borderRadius: 2 }}>
         <Typography variant="h5" sx={{ fontWeight: "bold", mb: 2 }}>
           Trip Details
         </Typography>
@@ -132,5 +137,6 @@ export default function TripDetails() {
         onConfirm={handleCancel}
       />
     </Container>
+    </>
   );
 }

@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { uploadRiderDocs } from "../services/api";
+import RiderMobileMenu from "../components/RiderMobileMenu";
 
 export default function DocumentUpload() {
   const navigate = useNavigate();
@@ -60,8 +61,12 @@ export default function DocumentUpload() {
   };
 
   return (
-    <Container maxWidth="sm">
-      <Paper
+    <>
+      {/* Mobile Menu for Riders */}
+      <RiderMobileMenu />
+      
+      <Container maxWidth="sm">
+        <Paper
         sx={{
           mt: 6,
           p: 4,
@@ -108,5 +113,6 @@ export default function DocumentUpload() {
         </Box>
       </Paper>
     </Container>
+    </>
   );
 }

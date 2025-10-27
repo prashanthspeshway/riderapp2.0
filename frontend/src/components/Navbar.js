@@ -73,7 +73,8 @@ export default function Navbar() {
       sx={{ 
         background: 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)',
         boxShadow: '0 2px 12px rgba(76, 175, 80, 0.3)',
-        height: 64
+        height: 64,
+        display: role === 'rider' ? { xs: 'none', md: 'block' } : 'block' // Hide on mobile only for riders
       }}
     >
       <Toolbar sx={{ 

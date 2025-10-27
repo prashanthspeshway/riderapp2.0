@@ -516,6 +516,171 @@ const updateRiderOnlineStatus = async (req, res) => {
   }
 };
 
+// Get riders by vehicle type (for admin)
+const getRidersByVehicleType = async (req, res) => {
+  try {
+    const { vehicleType } = req.params;
+    const { page = 1, limit = 10, status } = req.query;
+    
+    const query = { vehicleType: vehicleType.toLowerCase() };
+    
+    // Filter by status if provided
+    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
+      query.status = status;
+    }
+
+    const riders = await Rider.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .select('-__v');
+
+    const total = await Rider.countDocuments(query);
+
+    res.json({
+      success: true,
+      vehicleType,
+      riders,
+      pagination: {
+        current: parseInt(page),
+        pages: Math.ceil(total / limit),
+        total
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get riders by vehicle type error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch riders by vehicle type',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// Get vehicle type statistics (for admin dashboard)
+const getVehicleTypeStats = async (req, res) => {
+  try {
+    const stats = await Rider.aggregate([
+      {
+        $group: {
+          _id: '$vehicleType',
+          total: { $sum: 1 },
+          approved: {
+            $sum: { $cond: [{ $eq: ['$status', 'approved'] }, 1, 0] }
+          },
+          pending: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+          },
+          rejected: {
+            $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]);
+
+    // Get all vehicle types from VehicleType collection for complete data
+    const VehicleType = require('../models/VehicleType');
+    const allVehicleTypes = await VehicleType.find({ active: true }).select('code name seats ac');
+    
+    // Merge stats with vehicle type details
+    const vehicleStats = allVehicleTypes.map(vt => {
+      const stat = stats.find(s => s._id === vt.code) || {
+        _id: vt.code,
+        total: 0,
+        approved: 0,
+        pending: 0,
+        rejected: 0
+      };
+      
+      return {
+        vehicleType: vt.code,
+        name: vt.name,
+        seats: vt.seats,
+        ac: vt.ac,
+        ...stat
+      };
+    });
+
+    res.json({
+      success: true,
+      vehicleStats
+    });
+
+  } catch (error) {
+    console.error('❌ Get vehicle type stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch vehicle type statistics',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// Update rider's location (for real-time tracking)
+const updateRiderLocation = async (req, res) => {
+  try {
+    const riderId = req.user._id; // From JWT token (normalized)
+    const { lat, lng, address } = req.body;
+    
+    console.log('📍 Updating rider location for ID:', riderId, 'Lat:', lat, 'Lng:', lng);
+
+    // Check Rider collection
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found"
+      });
+    }
+
+    // Also update in User collection for riders that are users
+    const user = await User.findById(riderId);
+    if (user) {
+      user.currentLocation = {
+        lat,
+        lng,
+        address: address || '',
+        lastUpdated: new Date()
+      };
+      await user.save();
+      console.log('✅ Updated location in User collection');
+    }
+
+    // Update location in Rider collection
+    rider.currentLocation = {
+      lat,
+      lng,
+      address: address || '',
+      lastUpdated: new Date()
+    };
+    await rider.save();
+
+    console.log('✅ Rider location updated successfully');
+    res.json({
+      success: true,
+      message: "Location updated successfully",
+      location: {
+        lat,
+        lng,
+        address: address || ''
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update rider location error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update rider location',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   registerRider,
   getAllRiders,
@@ -524,5 +689,8 @@ module.exports = {
   deleteRider,
   uploadMultiple,
   getRiderStatus,
-  updateRiderOnlineStatus
+  updateRiderOnlineStatus,
+  getRidersByVehicleType,
+  getVehicleTypeStats,
+  updateRiderLocation
 };

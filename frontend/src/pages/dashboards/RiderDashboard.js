@@ -16,8 +16,24 @@ import {
   FormControlLabel,
   Badge,
   useTheme,
-  useMediaQuery
+  useMediaQuery,
+  Modal,
+  Fade,
+  Backdrop,
+  IconButton,
+  AppBar,
+  Toolbar,
+  InputBase,
+  Menu,
+  MenuItem,
+  Drawer,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText
 } from "@mui/material";
+import Navbar from "../../components/Navbar";
+import RiderMobileMenu from "../../components/RiderMobileMenu";
 import {
   DirectionsCar,
   LocationOn,
@@ -39,7 +55,14 @@ import {
   Route,
   TrendingUp,
   TrendingDown,
-  Security
+  Security,
+  Menu as MenuIcon,
+  Search,
+  History,
+  Settings,
+  Help,
+  AccountCircle,
+  Logout
 } from "@mui/icons-material";
 import axios from "axios";
 import { useAuth } from "../../contexts/AuthContext";
@@ -52,6 +75,9 @@ import SimpleChatModal from "../../components/SimpleChatModal";
 import ChatNotification from "../../components/ChatNotification";
 import RideNotification from "../../components/RideNotification";
 import OTPVerificationModal from "../../components/OTPVerificationModal";
+
+// Google Maps API Key
+const GOOGLE_API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo";
 
 // Notification sound function
 const playNotificationSound = () => {
@@ -76,8 +102,6 @@ const playNotificationSound = () => {
   }
 };
 
-// Shared socket instance
-
 export default function RiderDashboard() {
   const [rides, setRides] = useState([]);
   const [selectedRide, setSelectedRide] = useState(null);
@@ -89,17 +113,30 @@ export default function RiderDashboard() {
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [earnings, setEarnings] = useState({
-    today: 0,
-    week: 0,
-    month: 0,
-    total: 0
+    today: 7.75,
+    week: 320.75,
+    month: 1250.00,
+    total: 5670.25
   });
+  const [earningsModalOpen, setEarningsModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [menuAnchorEl, setMenuAnchorEl] = useState(null);
   const [stats, setStats] = useState({
-    totalRides: 0,
-    completedRides: 0,
+    totalRides: 156,
+    completedRides: 142,
     rating: 4.8,
     onlineTime: 0
   });
+  
+  // Bottom sheet state
+  const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
+  const [newRideRequest, setNewRideRequest] = useState(null);
+  
+  // Debug: Log when newRideRequest changes
+  useEffect(() => {
+    console.log("🔔 newRideRequest state changed:", newRideRequest);
+  }, [newRideRequest]);
+  
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
@@ -127,7 +164,6 @@ export default function RiderDashboard() {
     // Load rider data
     const loadRiderData = async () => {
       try {
-        // Use token from auth context instead of localStorage
         const token = auth.token;
         if (!token) {
           console.log("No token in auth context, redirecting to login");
@@ -146,7 +182,7 @@ export default function RiderDashboard() {
           
           // Set earnings (mock data for now)
           setEarnings({
-            today: 45.50,
+            today: 7.75,
             week: 320.75,
             month: 1250.00,
             total: 5670.25
@@ -164,13 +200,11 @@ export default function RiderDashboard() {
         console.error("Error loading rider data:", error);
         
         if (error.response?.status === 401) {
-          // Token expired or invalid - only redirect if it's a real auth error
           console.log("Authentication error, redirecting to login");
           showError("Session expired. Please login again.");
-          logout(); // Clear auth context
+          logout();
           navigate("/login");
         } else {
-          // Set default values if API fails (network issues, etc.)
           console.log("API error, setting default values:", error.message);
           setIsOnline(false);
           setIsAvailable(false);
@@ -185,23 +219,54 @@ export default function RiderDashboard() {
     socket.on("connect", () => {
       console.log("✅ Socket connected:", socket.id);
       if (auth?.user?._id) {
-        socket.emit("joinRiderRoom", auth.user._id);
-        console.log("🚗 Rider joined room:", auth.user._id);
+        const riderId = auth.user._id.toString();
+        socket.emit("joinRiderRoom", riderId);
+        console.log("🚗 Rider joined room:", riderId);
+        console.log("🚗 Socket ID:", socket.id);
+        console.log("🚗 Auth user ID:", auth.user._id);
+        
+        // 🔧 FIX: Also emit to ALL possible rider IDs for compatibility
+        // This ensures we receive events even if ID mismatch occurs
+        const alternativeIds = [
+          riderId,
+          auth.user.mobile,
+          `rider_${riderId}`,
+          `user_${riderId}`
+        ];
+        console.log("🔧 Joining multiple rooms for compatibility:", alternativeIds);
+        alternativeIds.forEach(id => socket.emit("joinRiderRoom", id));
+      } else {
+        console.error("❌ No auth user ID available for rider room");
       }
     });
 
     socket.on("newRide", (ride) => {
       console.log("New ride received:", ride);
-      fetchPendingRides(true); // Silent refresh
-      showSuccess("New ride request received!");
-      
-      // Play notification sound
+      fetchPendingRides(true);
+      setNewRideRequest(ride); // Show ride request popup
       playNotificationSound();
+    });
+
+    socket.on("rideRequest", (ride) => {
+      console.log("📱📱📱 RIDE REQUEST RECEIVED! 📱📱📱");
+      console.log("📱 Ride details:", ride);
+      console.log("📱 Ride ID:", ride._id);
+      console.log("📱 Ride type:", ride.rideType);
+      console.log("📱 Fare:", ride.totalFare);
+      console.log("📱 Pickup:", ride.pickup);
+      console.log("📱 Setting newRideRequest state...");
+      
+      setNewRideRequest(ride); // Show ride request popup
+      playNotificationSound();
+      
+      // Debug: Check state after a moment
+      setTimeout(() => {
+        console.log("📱 After setState - checking if popup should be visible");
+      }, 100);
     });
 
     socket.on("rideAccepted", (ride) => {
       console.log("🎉 Ride accepted:", ride);
-      console.log("🎉 Ride OTP status:", ride.otpVerified);
       setSelectedRide(ride);
       setNotificationOpen(true);
     });
@@ -213,55 +278,44 @@ export default function RiderDashboard() {
 
     socket.on("otpVerified", (data) => {
       console.log("🎉 OTP verified event received:", data);
-      console.log("🎉 Current selectedRide:", selectedRide);
-      console.log("🎉 Comparing ride IDs:", selectedRide?._id, "vs", data.rideId);
       
       if (selectedRide && (selectedRide._id == data.rideId || selectedRide._id === data.rideId)) {
         console.log("✅ Updating ride status to started");
         setSelectedRide(prev => {
           const updated = { ...prev, otpVerified: true, status: "started" };
-          console.log("✅ Updated selectedRide:", updated);
           return updated;
         });
         setOtpModalOpen(false);
         showSuccess("OTP verified successfully! Ride activated.");
-      } else {
-        console.log("❌ Ride ID mismatch or no selected ride");
       }
     });
 
-    // Listen for chat messages globally
     socket.on("message", (messageData) => {
       console.log("🚗 Received chat message:", messageData);
-      // Play notification sound for incoming messages
       if (messageData.sender !== 'rider') {
         playNotificationSound();
-        // Increment unread message count if chat is not open
         if (!chatOpen) {
           setUnreadMessages(prev => prev + 1);
         }
       }
     });
-    
 
     socket.on("rideCompleted", (ride) => {
       console.log("Ride completed:", ride);
       setSelectedRide(null);
-      fetchPendingRides(true); // Silent refresh
+      fetchPendingRides(true);
     });
 
     socket.on("rideCancelled", (ride) => {
       console.log("Ride cancelled:", ride);
       setSelectedRide(null);
-      fetchPendingRides(true); // Silent refresh
+      fetchPendingRides(true);
     });
-
-    // Remove automatic refresh to prevent flickering
-    // Only refresh on user actions and socket events
 
     return () => {
       socket.off("connect");
       socket.off("newRide");
+      socket.off("rideRequest");
       socket.off("rideAccepted");
       socket.off("rideStarted");
       socket.off("otpVerified");
@@ -270,27 +324,21 @@ export default function RiderDashboard() {
     };
   }, [auth, navigate, showSuccess]);
 
+  // Removed slider event handlers
+
   const fetchPendingRides = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       
-      console.log("🔍 Fetching pending rides...");
-      console.log("🔍 Auth token:", auth?.token ? "Present" : "Missing");
-      console.log("🔍 Auth user:", auth?.user);
-      
       const response = await getPendingRides();
-      console.log("🔍 API Response:", response.data);
       
       if (response.data?.success) {
         setRides(response.data.rides || []);
-        console.log("🔍 Set rides:", response.data.rides?.length || 0);
       } else {
-        console.error("API response error:", response.data);
         if (!silent) showError("Failed to fetch rides");
       }
     } catch (error) {
       console.error("Error fetching rides:", error);
-      console.error("Error details:", error.response?.data);
       if (!silent) {
         if (error.response?.data?.error) {
           showError(error.response.data.error);
@@ -307,7 +355,6 @@ export default function RiderDashboard() {
     try {
       const newOnlineStatus = !isOnline;
       
-      // Check if token exists in auth context
       const token = auth?.token;
       if (!token) {
         showError("Please login again");
@@ -315,7 +362,6 @@ export default function RiderDashboard() {
         return;
       }
       
-      // Update backend first
       const response = await axios.put(
         `http://localhost:5000/api/rider/status`,
         { isOnline: newOnlineStatus },
@@ -323,12 +369,16 @@ export default function RiderDashboard() {
       );
       
       if (response.data.success) {
-        // Only update state if backend update was successful
         setIsOnline(newOnlineStatus);
         
-        // If going offline, also set available to false
         if (!newOnlineStatus) {
           setIsAvailable(false);
+        }
+        
+        // Ensure rider joins socket room when going online
+        if (newOnlineStatus && auth?.user?._id) {
+          console.log("🔄 Joining rider room after going online");
+          socket.emit("joinRiderRoom", auth.user._id.toString());
         }
         
         showSuccess(newOnlineStatus ? "You are now online!" : "You are now offline!");
@@ -339,10 +389,8 @@ export default function RiderDashboard() {
       console.error("Error updating online status:", error);
       
       if (error.response?.status === 401) {
-        // Token expired or invalid
-        console.log("Authentication error in toggle online, redirecting to login");
         showError("Session expired. Please login again.");
-        logout(); // Clear auth context
+        logout();
         navigate("/login");
       } else if (error.response?.data?.message) {
         showError(error.response.data.message);
@@ -352,28 +400,21 @@ export default function RiderDashboard() {
     }
   };
 
+  // Slider handlers removed - using direct toggle now
+
   const handleAcceptRide = async (rideId) => {
     try {
       const response = await acceptRide(rideId);
       if (response.data?.success) {
         showSuccess("Ride accepted! Please verify OTP to activate the ride.");
         
-        // Set the selected ride to show active ride UI
         const acceptedRide = response.data.ride;
         if (acceptedRide) {
-          console.log("🚗 Accepted ride data:", acceptedRide);
-          console.log("🚗 OTP:", acceptedRide.otp);
-          console.log("🚗 OTP Verified:", acceptedRide.otpVerified);
-          console.log("🚗 Status:", acceptedRide.status);
           setSelectedRide(acceptedRide);
-          setOtpModalOpen(true); // Show OTP verification modal
+          setOtpModalOpen(true);
           
-          // Join chat room immediately when accepting ride
           const roomId = `ride_${acceptedRide._id}`;
-          console.log("🚗 Joining chat room for accepted ride:", roomId);
           socket.emit('joinChatRoom', roomId);
-        } else {
-          console.log("❌ No ride data in response:", response.data);
         }
         
         fetchPendingRides();
@@ -419,25 +460,7 @@ export default function RiderDashboard() {
 
   const handleChat = () => {
     setChatOpen(true);
-    setUnreadMessages(0); // Clear unread messages when chat is opened
-  };
-
-  const handleStartRide = async (rideId) => {
-    try {
-      // Use the API helper (POST) with auth interceptor
-      const response = await startRide(rideId);
-      
-      if (response.data?.success) {
-        showSuccess("Ride started!");
-        socket.emit("rideStarted", { rideId, riderId: auth?.user?._id });
-      } else {
-        showError(response.data?.message || "Failed to start ride");
-      }
-    } catch (error) {
-      console.error("Error starting ride:", error);
-      const msg = error.response?.data?.message || error.message || "Failed to start ride";
-      showError(msg);
-    }
+    setUnreadMessages(0);
   };
 
   const handleCancelRide = async (rideId) => {
@@ -462,24 +485,18 @@ export default function RiderDashboard() {
 
   const handleOTPVerified = (rideId) => {
     console.log("✅ OTP verified for ride:", rideId);
-    console.log("✅ Current selectedRide before update:", selectedRide);
     
-    // Update the selectedRide state directly
     if (selectedRide && selectedRide._id == rideId) {
       setSelectedRide(prev => {
         const updated = { ...prev, otpVerified: true, status: "started" };
-        console.log("✅ Updated selectedRide in handleOTPVerified:", updated);
         return updated;
       });
     } else {
-      // Fallback: refresh pending rides to get updated data
-      console.log("🔄 Fallback: Refreshing pending rides to get updated data");
       fetchPendingRides(true);
     }
     
     setOtpModalOpen(false);
     
-    // Small delay to ensure state update is processed
     setTimeout(() => {
       showSuccess("Ride activated successfully!");
     }, 100);
@@ -487,977 +504,385 @@ export default function RiderDashboard() {
 
   return (
     <Box sx={{ 
-      minHeight: '100vh', 
-      backgroundColor: '#f5f5f5',
-      pb: { xs: 1, md: 2 }
+      height: '100vh',
+      width: '100vw',
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      backgroundColor: '#ffffff',
+      overflow: 'hidden',
+      '@keyframes pulse': {
+        '0%': {
+          opacity: 1,
+        },
+        '50%': {
+          opacity: 0.5,
+        },
+        '100%': {
+          opacity: 1,
+        },
+      },
     }}>
+      {/* Original Navbar Component */}
+      <Navbar />
 
-      <Box sx={{ maxWidth: { xs: '100%', md: '100%' }, mx: 'auto', px: { xs: 1, md: 2 } }}>
-                {/* All 6 Stats Cards in Horizontal Line */}
-                <Grid container spacing={{ xs: 1, md: 1.5 }} sx={{ mb: { xs: 1.5, md: 2 } }}>
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      bgcolor: 'success.main',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Today's Earnings
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              ₹{(earnings.today || 0).toFixed(2)}
-                            </Typography>
-                          </Box>
-                          <AttachMoney sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      background: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Total Rides Today
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              {stats.totalRides || 0}
-                            </Typography>
-                          </Box>
-                          <DirectionsCar sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Rating
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              {stats.rating || 4.8}
-                            </Typography>
-                          </Box>
-                          <Star sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
+      {/* Mobile Menu Component */}
+      <RiderMobileMenu />
 
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Completed Rides
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              {stats.completedRides || 0}
-                            </Typography>
-                          </Box>
-                          <CheckCircle sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
+      {/* Account Menu for Desktop */}
+      <Menu
+        anchorEl={menuAnchorEl}
+        open={Boolean(menuAnchorEl)}
+        onClose={() => setMenuAnchorEl(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <MenuItem onClick={() => { setMenuAnchorEl(null); setEarningsModalOpen(true); }}>
+          <ListItemIcon><AttachMoney /></ListItemIcon>
+          Earnings
+        </MenuItem>
+        <MenuItem onClick={() => setMenuAnchorEl(null)}>
+          <ListItemIcon><Help /></ListItemIcon>
+          Help
+        </MenuItem>
+      </Menu>
 
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Online Time Today
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              {Math.floor(stats.onlineTime / 60)}h {stats.onlineTime % 60}m
-                            </Typography>
-                          </Box>
-                          <Schedule sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  
-                  <Grid item xs={6} sm={4} md={2}>
-                    <Card sx={{ 
-                      background: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
-                      color: 'white',
-                      borderRadius: 2,
-                      minHeight: { xs: 70, md: 90 },
-                      boxShadow: 2
-                    }}>
-                      <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: { xs: '0.7rem', md: '0.8rem' } }}>
-                              Weekly Earnings
-                            </Typography>
-                            <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5, fontSize: { xs: '1rem', md: '1.2rem' } }}>
-                              ₹{(earnings.week || 0).toFixed(2)}
-                            </Typography>
-                          </Box>
-                          <TrendingUp sx={{ fontSize: { xs: 20, md: 24 }, opacity: 0.8 }} />
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-
-        {/* Professional Driver Status Card */}
-        <Card sx={{ 
-          mb: { xs: 1.5, md: 2 }, 
-          borderRadius: 2, 
-          boxShadow: 2
-        }}>
-          <CardContent sx={{ p: { xs: 1.5, md: 2 } }}>
-            <Box sx={{ 
-              display: 'flex', 
-              flexDirection: { xs: 'column', sm: 'row' },
-              justifyContent: 'space-between', 
-              alignItems: { xs: 'flex-start', sm: 'center' },
-              gap: { xs: 2, sm: 0 }
-            }}>
-              <Typography variant={isMobile ? "body1" : "h6"} sx={{ 
-                fontWeight: 'bold', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1 
-              }}>
-                <PowerSettingsNew color="primary" sx={{ fontSize: { xs: 20, md: 24 } }} />
-                Driver Status
-      </Typography>
-
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: { xs: 1, md: 2 },
-                width: { xs: '100%', sm: 'auto' },
-                justifyContent: { xs: 'space-between', sm: 'flex-end' }
-              }}>
-                <Chip 
-                  label={isOnline ? 'ONLINE' : 'OFFLINE'} 
-                  color={isOnline ? 'success' : 'default'}
-                  sx={{ 
-                    fontWeight: 'bold',
-                    fontSize: { xs: '0.7rem', md: '0.8rem' },
-                    px: { xs: 1, md: 2 }
-                  }}
-                />
-      <Button
-        variant="contained"
-                  size={isMobile ? "small" : "medium"}
-                  onClick={handleToggleOnline}
-        sx={{
-                    backgroundColor: isOnline ? '#f44336' : '#4caf50',
-                    color: 'white',
-                    px: { xs: 2, md: 3 },
-                    py: { xs: 0.5, md: 1 },
-                    fontSize: { xs: '0.8rem', md: '0.9rem' },
-                    fontWeight: 'bold',
-                    borderRadius: { xs: 1, md: 2 },
-                    minWidth: { xs: 100, md: 120 },
-                    '&:hover': {
-                      backgroundColor: isOnline ? '#d32f2f' : '#388e3c'
-                    }
-                  }}
-                >
-                  {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
-      </Button>
-              </Box>
-            </Box>
-            
-            <Typography variant="body2" color="text.secondary" sx={{ 
-              mt: { xs: 1, md: 2 },
-              fontSize: { xs: '0.8rem', md: '0.9rem' }
-            }}>
-              {isOnline 
-                ? 'You are receiving ride requests' 
-                : 'Go online to start receiving ride requests'
-              }
-              </Typography>
-          </CardContent>
-        </Card>
-
-
-        {/* Mobile-First Pending Rides */}
-        <Card sx={{ 
-          borderRadius: { xs: 1, md: 2 }, 
-          boxShadow: { xs: 1, md: 3 }
-        }}>
-          <CardContent sx={{ p: { xs: 2, md: 3 } }}>
-            <Box sx={{ 
-              display: 'flex', 
-              flexDirection: { xs: 'column', sm: 'row' },
-              justifyContent: 'space-between', 
-              alignItems: { xs: 'flex-start', sm: 'center' },
-              mb: { xs: 2, md: 3 },
-              gap: { xs: 2, sm: 0 }
-            }}>
-              <Typography variant={isMobile ? "body1" : "h6"} sx={{ 
-                fontWeight: 'bold', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 1 
-              }}>
-                <DirectionsCar color="primary" sx={{ fontSize: { xs: 20, md: 24 } }} />
-            Pending Ride Requests
-          </Typography>
-              <Button
-                variant="outlined"
-                size={isMobile ? "small" : "medium"}
-                onClick={() => fetchPendingRides()}
-                disabled={loading}
-        sx={{
-                  minWidth: { xs: 80, md: 100 },
-                  fontSize: { xs: '0.8rem', md: '0.9rem' }
-                }}
-              >
-                {loading ? 'Refreshing...' : 'Refresh'}
-      </Button>
-            </Box>
-
-      {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
-              </Box>
-            ) : rides.length === 0 ? (
-              <Alert severity="info" sx={{ borderRadius: 2 }}>
-                {isOnline 
-                  ? "No pending ride requests at the moment. Stay online to receive new requests!"
-                  : "Go online to start receiving ride requests."
-                }
-              </Alert>
-                    ) : (
-                      <Grid container spacing={{ xs: 1, md: 2 }}>
-                        {rides.map((ride) => (
-                          <Grid item xs={12} md={6} key={ride._id}>
-                            <Card 
-                              sx={{ 
-                                cursor: 'pointer',
-                                border: selectedRide?._id === ride._id ? '2px solid #1976d2' : '1px solid #e0e0e0',
-                                borderRadius: { xs: 1, md: 2 },
-                                transition: 'all 0.3s ease',
-                                '&:hover': {
-                                  boxShadow: { xs: 2, md: 3 },
-                                  transform: { xs: 'none', md: 'translateY(-2px)' }
-                                }
-                              }}
-                              onClick={() => setSelectedRide(ride)}
-                            >
-                              <CardContent sx={{ p: { xs: 2, md: 3 } }}>
-                                <Box sx={{ 
-                                  display: 'flex', 
-                                  justifyContent: 'space-between', 
-                                  alignItems: 'flex-start', 
-                                  mb: { xs: 1.5, md: 2 }
-                                }}>
-                                  <Box>
-                                    <Typography variant={isMobile ? "body1" : "h6"} sx={{ fontWeight: 'bold' }}>
-                                      Ride Request
-              </Typography>
-                                    <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.8rem', md: '0.9rem' } }}>
-                                      {new Date(ride.createdAt).toLocaleString()}
-              </Typography>
-                                  </Box>
-                                  <Chip 
-                                    label={`₹${ride.totalFare || ride.fare || '0.00'}`} 
-                                    color="primary" 
-                                    sx={{ 
-                                      fontWeight: 'bold',
-                                      fontSize: { xs: '0.7rem', md: '0.8rem' }
-                                    }}
-                                  />
-                                </Box>
-                                
-                                <Box sx={{ mb: { xs: 1.5, md: 2 } }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                                    <LocationOn sx={{ fontSize: { xs: 14, md: 16 }, color: 'green', mr: 1 }} />
-                                    <Typography variant="body2" sx={{ 
-                                      fontWeight: 'bold',
-                                      fontSize: { xs: '0.8rem', md: '0.9rem' }
-                                    }}>
-                                      Pickup: {ride.pickupAddress || ride.pickup || 'Not specified'}
-              </Typography>
-                                  </Box>
-                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                    <LocationOn sx={{ fontSize: { xs: 14, md: 16 }, color: 'red', mr: 1 }} />
-                                    <Typography variant="body2" sx={{ 
-                                      fontWeight: 'bold',
-                                      fontSize: { xs: '0.8rem', md: '0.9rem' }
-                                    }}>
-                                      Drop: {ride.dropAddress || ride.drop || 'Not specified'}
-              </Typography>
-                                  </Box>
-                                </Box>
-                                
-                                <Box sx={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  mb: { xs: 1.5, md: 2 }
-                                }}>
-                                  <Person sx={{ fontSize: { xs: 14, md: 16 }, mr: 1 }} />
-                                  <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', md: '0.9rem' } }}>
-                                    {ride.userId?.fullName || 'Unknown User'}
-              </Typography>
-                                  <Star sx={{ fontSize: { xs: 14, md: 16 }, color: 'gold', ml: 1, mr: 0.5 }} />
-                                  <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', md: '0.9rem' } }}>
-                                    {ride.userId?.rating || '4.5'}
-              </Typography>
-                                </Box>
-                                
-                                <Box sx={{ display: 'flex', gap: { xs: 0.5, md: 1 } }}>
-                    <Button
-                      variant="contained"
-                      color="success"
-                                    startIcon={<CheckCircle sx={{ fontSize: { xs: 16, md: 20 } }} />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleAcceptRide(ride._id);
-                                    }}
-                                    sx={{ 
-                                      flex: 1,
-                                      fontSize: { xs: '0.8rem', md: '0.9rem' },
-                                      py: { xs: 0.5, md: 1 }
-                                    }}
-                                  >
-                                    Accept
-                </Button>
-                    <Button
-                                    variant="outlined"
-                      color="error"
-                                    startIcon={<Cancel sx={{ fontSize: { xs: 16, md: 20 } }} />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRejectRide(ride._id);
-                                    }}
-                                    sx={{ 
-                                      flex: 1,
-                                      fontSize: { xs: '0.8rem', md: '0.9rem' },
-                                      py: { xs: 0.5, md: 1 }
-                                    }}
-                                  >
-                                    Reject
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-                          </Grid>
-                        ))}
-                      </Grid>
-                    )}
-          </CardContent>
-        </Card>
+      {/* Full Screen Google Map */}
+      <Box sx={{
+        position: 'absolute',
+        top: isMobile ? '0px' : '64px', // No navbar on mobile, navbar on desktop
+        left: 0,
+        right: 0,
+        bottom: 0, // Full height now
+        zIndex: 1
+      }}>
+        <Map 
+          apiKey={GOOGLE_API_KEY}
+          pickup={null}
+          setPickup={() => {}}
+          setPickupAddress={() => {}}
+          drop={null}
+          setDrop={() => {}}
+          setDropAddress={() => {}}
+          riderLocation={riderLocation}
+          driverLocation={null}
+          setDistance={() => {}}
+          setDuration={() => {}}
+          viewOnly={true}
+          style={{ width: '100%', height: '100%' }}
+        />
       </Box>
 
-      {/* Professional Active Ride Section - Tiles Structure */}
-      {selectedRide && (
-        <Box sx={{ 
-          maxWidth: '100%', 
-          mx: 'auto', 
-          px: { xs: 1, md: 2 }, 
-          mt: { xs: 2, md: 3 }
+      {/* Floating GO Button (when offline) - Uber-style */}
+      {!isOnline && (
+        <Box sx={{
+          position: 'fixed',
+          bottom: 120,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1001
         }}>
-          {/* Header Tile */}
-          <Card sx={{ 
-            borderRadius: { xs: 2, md: 3 }, 
-            boxShadow: 4,
-            overflow: 'hidden',
-            bgcolor: 'success.main',
+          <Button
+            onClick={handleToggleOnline}
+            disabled={loading}
+            sx={{
+              width: 80,
+              height: 80,
+              borderRadius: '50%',
+              background: '#000000',
+              color: 'white',
+              fontSize: '1.2rem',
+              fontWeight: 600,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+              border: '3px solid white',
+              '&:hover': {
+                transform: 'scale(1.05)',
+                boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
+              },
+              '&:active': {
+                transform: 'scale(0.95)',
+              },
+              '&:disabled': {
+                background: '#6b7280',
+                boxShadow: '0 2px 8px rgba(107, 114, 128, 0.3)',
+              },
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {loading ? <CircularProgress size={24} color="inherit" /> : 'GO'}
+          </Button>
+        </Box>
+      )}
+
+      {/* Bottom Status Bar - Slideable Container */}
+      <Box sx={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        background: 'transparent'
+      }}>
+        {/* Collapsed Bar - Tap to open */}
+        <Box
+          onClick={() => setBottomSheetOpen(true)}
+          sx={{
+            backgroundColor: !isOnline ? '#1f2937' : '#22c55e',
             color: 'white',
-            mb: 2
+            p: 2,
+            cursor: 'pointer',
+            transition: 'background-color 0.3s ease',
+            '&:hover': {
+              opacity: 0.9
+            }
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+            {isOnline && (
+                <Box sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                backgroundColor: 'white',
+                  animation: 'pulse 2s infinite'
+                }} />
+            )}
+            <Typography variant="body1" sx={{ fontWeight: 600 }}>
+              {isOnline ? "You're online" : "Offline"}
+                </Typography>
+            {!isOnline && (
+              <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                - 5 min to request
+              </Typography>
+            )}
+          </Box>
+        </Box>
+              </Box>
+
+      {/* Slideable Bottom Sheet */}
+      <Drawer
+        anchor="bottom"
+        open={bottomSheetOpen}
+        onClose={() => setBottomSheetOpen(false)}
+        PaperProps={{
+          sx: {
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            maxHeight: '60vh',
+            backgroundColor: 'white'
+          }
+        }}
+      >
+        <Box sx={{ p: 3 }}>
+          {/* Handle */}
+                <Box sx={{
+            width: 40,
+            height: 4,
+            backgroundColor: '#d1d5db',
+            borderRadius: 2,
+            mx: 'auto',
+            mb: 3
+          }} />
+
+          <Typography variant="h6" sx={{ mb: 3, fontWeight: 700 }}>
+            {isOnline ? "You're Online" : "You're Offline"}
+          </Typography>
+
+          {/* Status Display */}
+          <Box sx={{
+            backgroundColor: isOnline ? '#f0fdf4' : '#f9fafb',
+            borderRadius: 2,
+            p: 2,
+            mb: 3,
+            border: `2px solid ${isOnline ? '#22c55e' : '#e5e7eb'}`
           }}>
-            <Box sx={{ 
-              p: { xs: 2, md: 3 }, 
-              background: 'rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(10px)'
-            }}>
-              <Box sx={{ 
-                display: 'flex', 
-                flexDirection: { xs: 'column', sm: 'row' },
-                alignItems: { xs: 'flex-start', sm: 'center' },
-                justifyContent: 'space-between',
-                gap: 2
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{
+                width: 48,
+                height: 48,
+                  borderRadius: '50%',
+                backgroundColor: isOnline ? '#22c55e' : '#6b7280',
+                  display: 'flex',
+                  alignItems: 'center',
+                justifyContent: 'center'
               }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Avatar sx={{ 
-                    bgcolor: 'rgba(255,255,255,0.2)', 
-                    width: { xs: 40, md: 48 }, 
-                    height: { xs: 40, md: 48 } 
-                  }}>
-                    <DirectionsCar sx={{ fontSize: { xs: 24, md: 28 } }} />
-                  </Avatar>
-                  <Box>
-                    <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                      Active Ride
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                      Ride ID: #{selectedRide._id}
-                    </Typography>
-                  </Box>
+                {isOnline ? (
+                  <PowerSettingsNew sx={{ color: 'white', fontSize: 28 }} />
+                ) : (
+                  <Stop sx={{ color: 'white', fontSize: 28 }} />
+                )}
                 </Box>
-                <Chip 
-                  label={selectedRide?.otpVerified ? "ACTIVE" : "AWAITING OTP"} 
-                  sx={{ 
-                    bgcolor: selectedRide?.otpVerified ? 'rgba(76, 175, 80, 0.9)' : 'rgba(255, 152, 0, 0.9)',
-                    color: 'white',
-                    fontWeight: 'bold',
-                    px: 2,
-                    py: 1,
-                    fontSize: { xs: '0.8rem', md: '0.9rem' }
-                  }} 
-                />
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {isOnline ? "Active & Accepting Rides" : "Not Accepting Rides"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {isOnline ? "Go online to start earning" : "Go offline to stop receiving requests"}
+                </Typography>
+              </Box>
               </Box>
             </Box>
 
-          </Card>
-
-          {/* Main Content - Left Panel (Details) & Right Panel (Map) */}
-          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
-            {/* Left Panel - Driver Details, Passenger Details, Ride Information, Actions */}
+          {/* Stats */}
+          <Grid container spacing={2} sx={{ mb: 3 }}>
+            <Grid item xs={6}>
             <Box sx={{ 
-              flex: { xs: 1, md: 1 }, 
-              display: 'flex', 
-              flexDirection: 'column', 
-              gap: 1,
-              height: '100%',
-              justifyContent: 'space-between'
+                backgroundColor: '#f9fafb',
+                borderRadius: 2,
+                p: 2,
+                textAlign: 'center'
+              }}>
+                <Typography variant="h4" sx={{ fontWeight: 700, color: '#22c55e' }}>
+                  ${earnings.today.toFixed(2)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Today's Earnings
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={6}>
+              <Box sx={{
+                backgroundColor: '#f9fafb',
+                borderRadius: 2,
+                p: 2,
+                textAlign: 'center'
+              }}>
+                <Typography variant="h4" sx={{ fontWeight: 700 }}>
+                  {stats.totalRides}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Total Rides
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+
+          {/* Actions */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Button 
+              variant="contained"
+              fullWidth
+              size="large"
+              onClick={handleToggleOnline}
+              startIcon={isOnline ? <Stop /> : <PlayArrow />}
+              sx={{
+                backgroundColor: isOnline ? '#ef4444' : '#22c55e',
+                color: 'white',
+                py: 1.5,
+                fontWeight: 600,
+                '&:hover': {
+                  backgroundColor: isOnline ? '#dc2626' : '#16a34a'
+                }
+              }}
+            >
+              {isOnline ? "Go Offline" : "Go Online"}
+              </Button>
+
+            </Box>
+          </Box>
+      </Drawer>
+
+      {/* Earnings Details Modal */}
+      {earningsModalOpen && (
+        <Box sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          zIndex: 2000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2
+        }}
+        onClick={() => setEarningsModalOpen(false)}
+        >
+          <Box sx={{
+            backgroundColor: 'white',
+            borderRadius: 3,
+            p: 4,
+            maxWidth: 400,
+            width: '100%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}
+          onClick={(e) => e.stopPropagation()}
+          >
+            <Typography variant="h5" sx={{ 
+              fontWeight: 700, 
+              mb: 3,
+              textAlign: 'center',
+              color: '#333'
             }}>
-              {/* Driver Details */}
-              <Card sx={{ 
-                borderRadius: 2, 
-                boxShadow: 3,
-                bgcolor: 'rgba(76, 175, 80, 0.05)',
-                border: '1px solid rgba(76, 175, 80, 0.2)'
+              Earnings Details
+            </Typography>
+            
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h3" sx={{ 
+                fontWeight: 700, 
+                textAlign: 'center',
+                color: '#4CAF50',
+                mb: 1
               }}>
-                <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    mb: 1, 
-                    fontWeight: 'bold', 
-                    color: 'success.main',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: { xs: '0.8rem', md: '0.9rem' }
-                  }}>
-                    <Person sx={{ fontSize: { xs: 14, md: 16 } }} color="success" />
-                    Driver Details
-                  </Typography>
-                  <Box sx={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    p: 1,
-                    bgcolor: 'rgba(76, 175, 80, 0.1)',
-                    borderRadius: 1.5
-                  }}>
-                    <Avatar sx={{ 
-                      bgcolor: 'success.main',
-                      width: { xs: 28, md: 32 },
-                      height: { xs: 28, md: 32 }
-                    }}>
-                      <Person sx={{ fontSize: { xs: 14, md: 16 } }} />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="caption" sx={{ 
-                        fontWeight: 'bold',
-                        fontSize: { xs: '0.75rem', md: '0.8rem' },
-                        display: 'block'
-                      }}>
-                        {auth?.user?.fullName || 'Driver'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{
-                        fontSize: { xs: '0.7rem', md: '0.75rem' }
-                      }}>
-                        {auth?.user?.mobile || 'No contact'}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-
-              {/* Passenger Details */}
-              <Card sx={{ 
-                borderRadius: 2, 
-                boxShadow: 3,
-                bgcolor: 'rgba(33, 150, 243, 0.05)',
-                border: '1px solid rgba(33, 150, 243, 0.2)'
+                ${earnings.today.toFixed(2)}
+              </Typography>
+              <Typography variant="body1" sx={{ 
+                textAlign: 'center',
+                color: '#666',
+                mb: 3
               }}>
-                <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    mb: 1, 
-                    fontWeight: 'bold', 
-                    color: 'primary.main',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: { xs: '0.8rem', md: '0.9rem' }
-                  }}>
-                    <Person sx={{ fontSize: { xs: 14, md: 16 } }} color="primary" />
-                    Passenger Details
-                  </Typography>
-                  <Box sx={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    p: 1,
-                    bgcolor: 'rgba(33, 150, 243, 0.1)',
-                    borderRadius: 1.5
-                  }}>
-                    <Avatar sx={{ 
-                      bgcolor: 'primary.main',
-                      width: { xs: 28, md: 32 },
-                      height: { xs: 28, md: 32 }
-                    }}>
-                      <Person sx={{ fontSize: { xs: 14, md: 16 } }} />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="caption" sx={{ 
-                        fontWeight: 'bold',
-                        fontSize: { xs: '0.75rem', md: '0.8rem' },
-                        display: 'block'
-                      }}>
-                        {selectedRide.riderId?.fullName || 'Unknown User'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{
-                        fontSize: { xs: '0.7rem', md: '0.75rem' }
-                      }}>
-                        {selectedRide.riderId?.mobile || 'No contact'}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-
-              {/* Ride Information */}
-              <Card sx={{ 
-                borderRadius: 2, 
-                boxShadow: 3,
-                bgcolor: 'rgba(255, 152, 0, 0.05)',
-                border: '1px solid rgba(255, 152, 0, 0.2)'
-              }}>
-                <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    mb: 1, 
-                    fontWeight: 'bold', 
-                    color: 'warning.main',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: { xs: '0.8rem', md: '0.9rem' }
-                  }}>
-                    <AttachMoney sx={{ fontSize: { xs: 14, md: 16 } }} color="warning" />
-                    Ride Information
-                  </Typography>
-                  <Grid container spacing={1}>
-                    <Grid item xs={4}>
-                      <Box sx={{ 
-                        textAlign: 'center',
-                        p: 1,
-                        bgcolor: 'rgba(255, 152, 0, 0.1)',
-                        borderRadius: 1.5
-                      }}>
-                        <AttachMoney sx={{ fontSize: { xs: 16, md: 18 }, color: 'warning.main', mb: 0.25 }} />
-                        <Typography variant="caption" color="text.secondary" sx={{ 
-                          fontSize: { xs: '0.65rem', md: '0.7rem' },
-                          display: 'block',
-                          mb: 0.25
-                        }}>
-                          Fare
-                        </Typography>
-                        <Typography variant="caption" sx={{ 
-                          fontWeight: 'bold', 
-                          color: 'warning.main',
-                          fontSize: { xs: '0.7rem', md: '0.8rem' },
-                          display: 'block'
-                        }}>
-                          ₹{selectedRide.totalFare || selectedRide.fare || '0.00'}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Box sx={{ 
-                        textAlign: 'center',
-                        p: 1,
-                        bgcolor: 'rgba(76, 175, 80, 0.1)',
-                        borderRadius: 1.5
-                      }}>
-                        <Route sx={{ fontSize: { xs: 16, md: 18 }, color: 'success.main', mb: 0.25 }} />
-                        <Typography variant="caption" color="text.secondary" sx={{ 
-                          fontSize: { xs: '0.65rem', md: '0.7rem' },
-                          display: 'block',
-                          mb: 0.25
-                        }}>
-                          Distance
-                        </Typography>
-                        <Typography variant="caption" sx={{ 
-                          fontWeight: 'bold', 
-                          color: 'success.main',
-                          fontSize: { xs: '0.7rem', md: '0.8rem' },
-                          display: 'block'
-                        }}>
-                          {selectedRide.distance ? (selectedRide.distance / 1000).toFixed(4) : 'N/A'} km
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={4}>
-                      <Box sx={{ 
-                        textAlign: 'center',
-                        p: 1,
-                        bgcolor: 'rgba(33, 150, 243, 0.1)',
-                        borderRadius: 1.5
-                      }}>
-                        <AccessTime sx={{ fontSize: { xs: 16, md: 18 }, color: 'primary.main', mb: 0.25 }} />
-                        <Typography variant="caption" color="text.secondary" sx={{ 
-                          fontSize: { xs: '0.65rem', md: '0.7rem' },
-                          display: 'block',
-                          mb: 0.25
-                        }}>
-                          ETA
-                        </Typography>
-                        <Typography variant="caption" sx={{ 
-                          fontWeight: 'bold', 
-                          color: 'primary.main',
-                          fontSize: { xs: '0.7rem', md: '0.8rem' },
-                          display: 'block'
-                        }}>
-                          {selectedRide.estimatedTime || 'N/A'} min
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                </CardContent>
-              </Card>
-
-              {/* Actions */}
-              <Card sx={{ 
-                borderRadius: 2, 
-                boxShadow: 3,
-                bgcolor: 'rgba(0, 0, 0, 0.02)',
-                border: '1px solid rgba(0, 0, 0, 0.1)'
-              }}>
-                <CardContent sx={{ p: { xs: 1, md: 1.5 } }}>
-                  <Typography variant="subtitle2" sx={{ 
-                    mb: 1, 
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                    fontSize: { xs: '0.8rem', md: '0.9rem' }
-                  }}>
-                    <Security sx={{ fontSize: { xs: 14, md: 16 } }} />
-                    Actions
-                  </Typography>
-                  <Grid container spacing={1}>
-                    {(() => {
-                      console.log("🔍 Rendering Actions - selectedRide:", selectedRide);
-                      console.log("🔍 OTP Verified:", selectedRide?.otpVerified);
-                      console.log("🔍 Status:", selectedRide?.status);
-                      return null;
-                    })()}
-                    {!selectedRide?.otpVerified ? (
-                      <>
-                        <Grid item xs={12}>
-                          <Button
-                            variant="contained"
-                            startIcon={<Security sx={{ fontSize: { xs: 14, md: 16 } }} />}
-                            onClick={() => setOtpModalOpen(true)}
-                            fullWidth
-                            sx={{
-                              bgcolor: 'warning.main',
-                              color: 'white',
-                              py: 0.75,
-                              fontWeight: 'bold',
-                              fontSize: { xs: '0.75rem', md: '0.8rem' },
-                              '&:hover': { bgcolor: 'warning.dark' }
-                            }}
-                          >
-                            Verify OTP
-                          </Button>
-                        </Grid>
-                        
-                        <Grid item xs={12}>
-                          <Typography variant="caption" sx={{ 
-                            textAlign: 'center', 
-                            color: 'text.secondary',
-                            fontStyle: 'italic',
-                            fontSize: { xs: '0.7rem', md: '0.75rem' },
-                            mb: 1,
-                            display: 'block'
-                          }}>
-                            Waiting for passenger to provide OTP
-                          </Typography>
-                        </Grid>
-                        
-                        <Grid item xs={12}>
-                          <Button
-                            variant="outlined"
-                            startIcon={
-                              <Box sx={{ position: 'relative' }}>
-                                <Chat sx={{ fontSize: { xs: 14, md: 16 } }} />
-                                {unreadMessages > 0 && (
-                                  <Box
-                                    sx={{
-                                      position: 'absolute',
-                                      top: -4,
-                                      right: -4,
-                                      bgcolor: 'error.main',
-                                      color: 'white',
-                                      borderRadius: '50%',
-                                      minWidth: 14,
-                                      height: 14,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '0.65rem',
-                                      fontWeight: 'bold',
-                                      border: '1px solid white'
-                                    }}
-                                  >
-                                    {unreadMessages > 9 ? '9+' : unreadMessages}
-                                  </Box>
-                                )}
-                              </Box>
-                            }
-                            onClick={handleChat}
-                            fullWidth
-                            sx={{
-                              borderColor: 'primary.main',
-                              color: 'primary.main',
-                              py: 0.75,
-                              fontWeight: 'bold',
-                              fontSize: { xs: '0.75rem', md: '0.8rem' },
-                              '&:hover': { 
-                                borderColor: 'primary.dark',
-                                bgcolor: 'primary.light',
-                                color: 'primary.dark'
-                              }
-                            }}
-                          >
-                            Message Passenger
-                          </Button>
-                        </Grid>
-        </>
-      ) : (
-        <>
-                        <Grid item xs={12} sm={6}>
-                          <Button
-                            variant="contained"
-                            startIcon={<Phone sx={{ fontSize: { xs: 14, md: 16 } }} />}
-                            onClick={handleCall}
-                            fullWidth
-                            sx={{
-                              bgcolor: 'success.main',
-                              color: 'white',
-                              py: 0.75,
-                              fontWeight: 'bold',
-                              fontSize: { xs: '0.75rem', md: '0.8rem' },
-                              '&:hover': { bgcolor: 'success.dark' }
-                            }}
-                          >
-                            Call
-                          </Button>
-                        </Grid>
-                        
-                        <Grid item xs={12} sm={6}>
-                    <Button
-                      variant="contained"
-                            startIcon={
-                              <Box sx={{ position: 'relative' }}>
-                                <Chat sx={{ fontSize: { xs: 14, md: 16 } }} />
-                                {unreadMessages > 0 && (
-                                  <Box
-                                    sx={{
-                                      position: 'absolute',
-                                      top: -4,
-                                      right: -4,
-                                      bgcolor: 'error.main',
-                                      color: 'white',
-                                      borderRadius: '50%',
-                                      minWidth: 14,
-                                      height: 14,
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      fontSize: '0.65rem',
-                                      fontWeight: 'bold',
-                                      border: '1px solid white'
-                                    }}
-                                  >
-                                    {unreadMessages > 9 ? '9+' : unreadMessages}
-                                  </Box>
-                                )}
-                              </Box>
-                            }
-                            onClick={() => setChatOpen(true)}
-                            fullWidth
-                            sx={{
-                              bgcolor: 'primary.main',
-                              color: 'white',
-                              py: 0.75,
-                              fontWeight: 'bold',
-                              fontSize: { xs: '0.75rem', md: '0.8rem' },
-                              '&:hover': { bgcolor: 'primary.dark' }
-                            }}
-                          >
-                            Chat
-                    </Button>
-                        </Grid>
-                        
-                        <Grid item xs={12}>
-                    <Button
-                      variant="contained"
-                            startIcon={<CheckCircle sx={{ fontSize: { xs: 14, md: 16 } }} />}
-                            onClick={() => handleStartRide(selectedRide._id)}
-                            fullWidth
-                            sx={{
-                              bgcolor: 'success.main',
-                              color: 'white',
-                              py: 0.75,
-                              fontWeight: 'bold',
-                              fontSize: { xs: '0.75rem', md: '0.8rem' },
-                              '&:hover': { bgcolor: 'success.dark' }
-                            }}
-                          >
-                            Start Ride
-                          </Button>
-                        </Grid>
-                      </>
-                    )}
-                    
-                    <Grid item xs={12}>
-                      <Button
-                        variant="outlined"
-                        startIcon={<Cancel sx={{ fontSize: { xs: 14, md: 16 } }} />}
-                        onClick={() => handleCancelRide(selectedRide._id)}
-                        fullWidth
-                        sx={{
-                          borderColor: 'error.main',
-                          color: 'error.main',
-                          py: 0.75,
-                          fontWeight: 'bold',
-                          fontSize: { xs: '0.75rem', md: '0.8rem' },
-                          '&:hover': { 
-                            borderColor: 'error.dark',
-                            bgcolor: 'error.light',
-                            color: 'error.dark'
-                          }
-                        }}
-                      >
-                        Cancel Ride
-                    </Button>
-                    </Grid>
-                  </Grid>
-                </CardContent>
-              </Card>
+                Today's Earnings
+              </Typography>
             </Box>
 
-            {/* Right Panel - Map */}
-            <Box sx={{ 
-              flex: { xs: 1, md: 2 }, 
-              minHeight: { xs: 300, md: 500 }
-            }}>
-              <Card sx={{ 
-                borderRadius: 2, 
-                boxShadow: 3,
-                overflow: 'hidden',
-                height: '100%'
+            <Divider sx={{ mb: 3 }} />
+
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" sx={{ 
+                fontWeight: 600, 
+                mb: 2,
+                color: '#333'
               }}>
-                <Box sx={{ 
-                  p: 2, 
-                  bgcolor: 'primary.main',
-                  color: 'white'
-                }}>
-                  <Typography variant="h6" sx={{ 
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1
-                  }}>
-                    <LocationOn />
-                    Live Route Map
-                  </Typography>
-                </Box>
-                
-                <Box sx={{ 
-                  height: { xs: 300, md: 450 },
-                  width: '100%',
-                  position: 'relative'
-                }}>
-                  {(() => {
-                    const hasPickup = selectedRide.pickupCoords || selectedRide.pickup;
-                    const hasDrop = selectedRide.dropCoords || selectedRide.drop;
-                    
-                    return hasPickup || hasDrop ? (
-                      <Map
-                        apiKey="AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo"
-                        pickup={selectedRide.pickupCoords || selectedRide.pickup}
-                        drop={selectedRide.dropCoords || selectedRide.drop}
-                        driverLocation={selectedRide.captainId?.currentLocation}
-                        riderLocation={riderLocation}
-                        setDistance={setDistance}
-                        setDuration={setDuration}
-                        setPickup={() => {}}
-                        setPickupAddress={() => {}}
-                        setDrop={() => {}}
-                        setDropAddress={() => {}}
-                      />
-                    ) : (
-                      <Box sx={{ 
-                        display: 'flex', 
-                        flexDirection: 'column',
-                        justifyContent: 'center', 
-                        alignItems: 'center',
-                        height: '100%',
-                        bgcolor: 'rgba(0,0,0,0.05)',
-                        color: 'text.secondary'
-                      }}>
-                        <LocationOn sx={{ fontSize: 48, opacity: 0.5, mb: 2 }} />
-                        <Typography variant="h6" sx={{ opacity: 0.7 }}>
-                          No route information available
-                        </Typography>
-                      </Box>
-                    );
-                  })()}
-                </Box>
-              </Card>
+                Earnings Breakdown
+              </Typography>
+              
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Base Earnings
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  ₹{(earnings.today * 0.85).toFixed(2)}
+                </Typography>
+              </Box>
+              
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Tips Received
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  ₹{(earnings.today * 0.15).toFixed(2)}
+                </Typography>
+              </Box>
             </Box>
+
+            <Button
+              fullWidth
+              variant="contained"
+              onClick={() => setEarningsModalOpen(false)}
+              sx={{
+                backgroundColor: '#4CAF50',
+                '&:hover': {
+                  backgroundColor: '#45a049'
+                },
+                py: 1.5,
+                fontSize: '1rem',
+                fontWeight: 600
+              }}
+            >
+              Close
+            </Button>
           </Box>
         </Box>
       )}
@@ -1466,20 +891,17 @@ export default function RiderDashboard() {
       <SimpleChatModal
         open={chatOpen}
         onClose={() => setChatOpen(false)}
-        ride={selectedRide}
-        userRole="rider"
-        socket={socket}
-        auth={auth}
+        rideId={selectedRide?._id}
+        userType="rider"
       />
 
-      {/* Ride Notification Popup */}
+      {/* Ride Notification Modal */}
       <RideNotification
         open={notificationOpen}
         onClose={() => setNotificationOpen(false)}
         ride={selectedRide}
-        onCall={handleCall}
-        onChat={handleChat}    
-        userRole="rider"
+        onAccept={handleAcceptRide}
+        onReject={handleRejectRide}
       />
 
       {/* OTP Verification Modal */}
@@ -1487,9 +909,190 @@ export default function RiderDashboard() {
         open={otpModalOpen}
         onClose={() => setOtpModalOpen(false)}
         ride={selectedRide}
-        onVerified={handleOTPVerified}
+        onOTPVerified={handleOTPVerified}
+        onCancel={handleCancelRide}
       />
 
+
+      {/* Ride Request Popup - Uber Style */}
+      {newRideRequest && (
+        <Box sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 99998,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          animation: 'fadeIn 0.3s ease-in'
+        }}
+        onClick={() => {
+          console.log("Closing popup...");
+          setNewRideRequest(null);
+        }}
+        >
+          <Card
+            onClick={(e) => e.stopPropagation()}
+            sx={{
+              width: '95%',
+              maxWidth: 400,
+              mb: 2,
+              borderRadius: 3,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              backgroundColor: 'white',
+              animation: 'slideUp 0.3s ease-out',
+              '@keyframes slideUp': {
+                from: { transform: 'translateY(100px)', opacity: 0 },
+                to: { transform: 'translateY(0)', opacity: 1 }
+              }
+            }}
+          >
+            <CardContent sx={{ p: 0 }}>
+              {/* Ride Type Header - Black pill with white text */}
+              <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                py: 2,
+                px: 2
+              }}>
+                <Box sx={{
+                  backgroundColor: 'black',
+                  color: 'white',
+                  px: 2.5,
+                  py: 0.75,
+                  borderRadius: '25px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}>
+                  <Person sx={{ fontSize: 18 }} />
+                  <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem' }}>
+                    Uber {newRideRequest.rideType ? newRideRequest.rideType.charAt(0).toUpperCase() + newRideRequest.rideType.slice(1) : 'Car'}
+                  </Typography>
+                </Box>
+              </Box>
+
+              {/* Fare - Large and bold */}
+              <Box sx={{ textAlign: 'center', py: 2, px: 2 }}>
+                <Typography variant="h2" sx={{
+                  fontWeight: 700,
+                  fontSize: '2.5rem',
+                  mb: 0.5
+                }}>
+                  ₹{newRideRequest.totalFare || newRideRequest.total || 117}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{
+                  display: 'block',
+                  mb: 1
+                }}>
+                  *Includes 5% tax
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  ★{newRideRequest.rider?.rating || newRideRequest.user?.rating || 4.6} Cash payment
+                </Typography>
+              </Box>
+
+              <Divider />
+
+              {/* Pickup & Drop - Like Uber */}
+              <Box sx={{ px: 2, py: 2 }}>
+                {/* Pickup */}
+                <Box sx={{ display: 'flex', alignItems: 'start', mb: 2 }}>
+                  <Box sx={{ mr: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <Box sx={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      border: '2px solid #000',
+                      backgroundColor: '#fff',
+                      mb: 1
+                    }} />
+                    <Box sx={{
+                      width: 1.5,
+                      height: 40,
+                      backgroundColor: '#e5e7eb'
+                    }} />
+                  </Box>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" sx={{ color: '#666', display: 'block', mb: 0.5 }}>
+                      {newRideRequest.matchDetails?.eta || 6} mins ({newRideRequest.matchDetails?.distance || 1.0} km) away
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#333' }}>
+                      {newRideRequest.pickup || 'Pickup location address'}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* Drop */}
+                <Box sx={{ display: 'flex', alignItems: 'start' }}>
+                  <Box sx={{ mr: 2, display: 'flex', alignItems: 'flex-start' }}>
+                    <Box sx={{
+                      width: 10,
+                      height: 10,
+                      backgroundColor: '#000',
+                      borderRadius: '2px'
+                    }} />
+                  </Box>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" sx={{ color: '#666', display: 'block', mb: 0.5 }}>
+                      {newRideRequest.duration || 35} mins ({newRideRequest.distance || 13.8} km) trip
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#333' }}>
+                      {newRideRequest.drop || 'Drop-off location address'}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              <Divider />
+
+              {/* Action Buttons */}
+              <Box sx={{ display: 'flex', gap: 2, p: 2 }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  color="error"
+                  size="large"
+                  onClick={() => {
+                    console.log("❌ Rejecting ride:", newRideRequest._id);
+                    handleRejectRide(newRideRequest._id);
+                    setNewRideRequest(null);
+                  }}
+                  sx={{ py: 1.5, fontWeight: 600, borderRadius: 2 }}
+                >
+                  Reject
+                </Button>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  size="large"
+                  onClick={() => {
+                    console.log("✅ Accepting ride:", newRideRequest._id);
+                    handleAcceptRide(newRideRequest._id);
+                    setNewRideRequest(null);
+                  }}
+                  sx={{
+                    backgroundColor: '#22c55e',
+                    color: 'white',
+                    py: 1.5,
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    '&:hover': {
+                      backgroundColor: '#16a34a'
+                    }
+                  }}
+                >
+                  Accept Ride
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
     </Box>
   );
 }

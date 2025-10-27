@@ -187,6 +187,13 @@ const riderSchema = new mongoose.Schema({
   isAvailable: {
     type: Boolean,
     default: false
+  },
+  // Real-time location tracking
+  currentLocation: {
+    lat: { type: Number },
+    lng: { type: Number },
+    address: { type: String },
+    lastUpdated: { type: Date }
   }
 }, {
   timestamps: true

@@ -34,6 +34,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useNotification } from "../contexts/NotificationContext";
 import api from "../services/api";
+import RiderMobileMenu from "../components/RiderMobileMenu";
 
 export default function Profile() {
   const { auth, logout } = useAuth();
@@ -174,6 +175,9 @@ export default function Profile() {
       backgroundColor: '#f8f9fa',
       pb: { xs: 2, md: 4 }
     }}>
+      {/* Mobile Menu for Riders */}
+      {userRole === 'rider' && <RiderMobileMenu />}
+      
       <Box sx={{ maxWidth: { xs: '100%', md: 800 }, mx: 'auto', px: { xs: 2, md: 3 } }}>
         {/* Profile Header */}
         <Card sx={{ 

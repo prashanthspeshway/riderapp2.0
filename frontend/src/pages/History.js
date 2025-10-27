@@ -37,6 +37,7 @@ import api from "../services/api";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
+import RiderMobileMenu from "../components/RiderMobileMenu";
 
 export default function History() {
   const [history, setHistory] = useState([]);
@@ -271,6 +272,9 @@ export default function History() {
       backgroundColor: '#f8f9fa',
       pb: { xs: 2, md: 4 }
     }}>
+      {/* Mobile Menu for Riders */}
+      {userRole === 'rider' && <RiderMobileMenu />}
+      
       <Box sx={{ maxWidth: { xs: '100%', md: 1200 }, mx: 'auto', px: { xs: 2, md: 3 } }}>
         {/* Header */}
         <Card sx={{ 

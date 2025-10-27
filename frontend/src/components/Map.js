@@ -29,6 +29,7 @@ export default function Map({
   driverLocation,
   setDistance,
   setDuration,
+  viewOnly = false,
 }) {
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
@@ -153,23 +154,23 @@ export default function Map({
             scaleControl: true,         // ✅ adds scale bar
       }}
       onLoad={(map) => (mapRef.current = map)}
-      onClick={(e) => {
+      onClick={viewOnly ? undefined : (e) => {
         const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
         setDrop(loc);
         getAddressFromCoords(loc.lat, loc.lng, setDropAddress);
       }}
     >
       {/* ✅ Pickup Marker (Green) */}
-      {pickup && pickup.lat && pickup.lng && (
+      {pickup && pickup.lat && pickup.lng && !viewOnly && (
         <Marker
           key={`pickup-${pickup.lat.toFixed(5)}-${pickup.lng.toFixed(5)}`}
           position={pickup}
-          draggable={true}
+          draggable={!viewOnly}
           icon={{
             url: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
             scaledSize: new window.google.maps.Size(32, 32),
           }}
-          onDragEnd={(e) => {
+          onDragEnd={viewOnly ? undefined : (e) => {
             const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
             setPickup(loc);
             getAddressFromCoords(loc.lat, loc.lng, setPickupAddress);
@@ -178,16 +179,16 @@ export default function Map({
       )}
 
       {/* ✅ Drop Marker (Red) */}
-      {drop && drop.lat && drop.lng && (
+      {drop && drop.lat && drop.lng && !viewOnly && (
         <Marker
           key={`drop-${drop.lat.toFixed(5)}-${drop.lng.toFixed(5)}`}
           position={drop}
-          draggable={true}
+          draggable={!viewOnly}
           icon={{
             url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
             scaledSize: new window.google.maps.Size(32, 32),
           }}
-          onDragEnd={(e) => {
+          onDragEnd={viewOnly ? undefined : (e) => {
             const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
             setDrop(loc);
             getAddressFromCoords(loc.lat, loc.lng, setDropAddress);

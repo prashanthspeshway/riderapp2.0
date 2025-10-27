@@ -4,14 +4,13 @@ import {
   Button, Drawer, CircularProgress, ListItemButton,
   Card, CardContent, Chip, Avatar, Divider,
   Stepper, Step, StepLabel, Alert, Snackbar, Grid,
-  useTheme, useMediaQuery
+  useTheme, useMediaQuery, IconButton
 } from "@mui/material";
 import {
   DirectionsCar, TwoWheeler, LocalTaxi, LocalShipping,
   LocationOn, AccessTime, AttachMoney, Star, Phone, Chat,
   AcUnit, AirportShuttle, ShoppingBag
 } from "@mui/icons-material";
-import { keyframes } from "@mui/system";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -47,13 +46,6 @@ const playNotificationSound = () => {
   }
 };
 
-// Subtle green pulse animation for avatars (consistent brand feel)
-const pulse = keyframes`
-  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.4); }
-  50% { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(46, 125, 50, 0.0); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(46, 125, 50, 0.0); }
-`;
-
 // Use shared socket instance
 
 export default function Booking() {
@@ -83,6 +75,7 @@ export default function Booking() {
   const [chatOpen, setChatOpen] = useState(false);
   const [otp, setOtp] = useState("");
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [currentRideId, setCurrentRideId] = useState(null);
   // Mobile bottom sheet snap height (half -> full)
   const [sheetExpanded, setSheetExpanded] = useState(false);
   // Control bottom sheet visibility (hide on backdrop tap)
@@ -95,6 +88,103 @@ export default function Booking() {
       setSheetExpanded(false);
     }
   }, [isMobile, drop, pickup, showDriverDetails]);
+
+  // Uber-like bottom sheet with scroll-based expansion
+  const bottomSheetRef = useRef(null);
+  const scrollableContentRef = useRef(null);
+  const [lastScrollTop, setLastScrollTop] = useState(0);
+  const [scrollVelocity, setScrollVelocity] = useState(0);
+  const lastScrollTime = useRef(Date.now());
+  
+  useEffect(() => {
+    const scrollableElement = scrollableContentRef.current;
+    const bottomSheetElement = bottomSheetRef.current;
+    
+    if (!scrollableElement || !bottomSheetElement || !isMobile || !bottomSheetVisible || !drop || showDriverDetails) {
+      return;
+    }
+
+    let startY = 0;
+    let isDragging = false;
+
+    const handleTouchStart = (e) => {
+      startY = e.touches[0].clientY;
+      isDragging = true;
+    };
+
+    const handleTouchMove = (e) => {
+      if (!isDragging) return;
+      
+      const currentY = e.touches[0].clientY;
+      const deltaY = startY - currentY;
+      
+      // Swipe up to expand (like Uber) - more sensitive
+      if (deltaY > 20 && !sheetExpanded) {
+        setSheetExpanded(true);
+        isDragging = false;
+      } 
+      // Swipe down to collapse (like Uber) - more sensitive
+      else if (deltaY < -20 && sheetExpanded && scrollableElement.scrollTop <= 10) {
+        setSheetExpanded(false);
+        isDragging = false;
+      }
+    };
+
+    const handleTouchEnd = () => {
+      isDragging = false;
+    };
+
+    const handleScroll = (e) => {
+      const element = e.target;
+      const currentScrollTop = element.scrollTop;
+      const now = Date.now();
+      const timeDelta = now - lastScrollTime.current;
+      const scrollDelta = currentScrollTop - lastScrollTop;
+      
+      // Calculate scroll velocity
+      const velocity = timeDelta > 0 ? scrollDelta / timeDelta : 0;
+      setScrollVelocity(velocity);
+      
+      // Uber-like scroll behavior - more sensitive
+      if (scrollDelta < -5 && !sheetExpanded) {
+        // Scrolling up while collapsed -> expand
+        setSheetExpanded(true);
+      } else if (scrollDelta > 5 && sheetExpanded && currentScrollTop <= 10) {
+        // Scrolling down while expanded and near top -> collapse
+        setSheetExpanded(false);
+      }
+      
+      setLastScrollTop(currentScrollTop);
+      lastScrollTime.current = now;
+    };
+
+    // Add event listeners
+    bottomSheetElement.addEventListener('touchstart', handleTouchStart, { passive: true });
+    bottomSheetElement.addEventListener('touchmove', handleTouchMove, { passive: true });
+    bottomSheetElement.addEventListener('touchend', handleTouchEnd, { passive: true });
+    scrollableElement.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      bottomSheetElement.removeEventListener('touchstart', handleTouchStart);
+      bottomSheetElement.removeEventListener('touchmove', handleTouchMove);
+      bottomSheetElement.removeEventListener('touchend', handleTouchEnd);
+      scrollableElement.removeEventListener('scroll', handleScroll);
+    };
+  }, [sheetExpanded, isMobile, bottomSheetVisible, drop, showDriverDetails, lastScrollTop]);
+
+  // Auto-scroll to top when sheet expands
+  useEffect(() => {
+    if (sheetExpanded && scrollableContentRef.current) {
+      // Small delay to ensure the sheet has expanded before scrolling
+      setTimeout(() => {
+        scrollableContentRef.current?.scrollTo({
+          top: 0,
+          behavior: 'smooth'
+        });
+      }, 100);
+    }
+  }, [sheetExpanded]);
+
   // Refs to pickup/drop inputs for quick editing
   const pickupInputRef = useRef(null);
   const dropInputRef = useRef(null);
@@ -538,13 +628,66 @@ export default function Booking() {
       
       if (res.data.success) {
         showSuccess("Ride request created successfully!");
-      socket.emit("newRide", res.data.ride);
+        const rideId = res.data?.ride?._id || res.data?.ride?.id || res.data?.ride?.rideId || null;
+        setCurrentRideId(rideId);
+        socket.emit("newRide", res.data.ride);
       }
     } catch (err) {
       setLookingForRider(false);
       showError(err.response?.data?.message || "Failed to create ride request");
     }
   };
+
+  // Client-side matchmaking (scoring) helper
+  const matchDrivers = (drivers = [], { pickup, drop, type } = {}) => {
+    if (!drivers.length || !pickup || !drop) return null;
+
+    const haversine = (a, b) => {
+      const toRad = (v) => (v * Math.PI) / 180;
+      const R = 6371; // km
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+
+    const scored = drivers
+      .filter((d) => d.isAvailable !== false)
+      .map((d) => {
+        const distToPickup = d.location ? haversine(d.location, pickup) : 999;
+        const vehicleMatch = d.vehicleType === type ? 1 : 0;
+        const eta = d.etaMin || Math.round(distToPickup * 3) || 10; // rough fallback
+        const rating = d.rating || 4.5;
+        const priceBias = d.baseFare ? 1 / Math.max(1, d.baseFare) : 1; // cheaper preferred
+
+        // Normalize and weight: lower distance & ETA is better, higher rating is better
+        const score = 
+          (1 / Math.max(0.3, distToPickup)) * 0.4 +
+          (1 / Math.max(1, eta)) * 0.3 +
+          (rating / 5) * 0.2 +
+          (vehicleMatch ? 0.1 : 0) +
+          priceBias * 0.05;
+
+        return { ...d, _score: score, _distToPickup: distToPickup, _eta: eta };
+      })
+      .sort((a, b) => b._score - a._score);
+
+    return scored[0] || null;
+  };
+
+  // Listen for nearbyDrivers and propose a best match
+  useEffect(() => {
+    const handler = (drivers) => {
+      const best = matchDrivers(drivers, { pickup, drop, type: selectedRide });
+      if (best && currentRideId) {
+        socket.emit('proposeDriver', { rideId: currentRideId, driverId: best.id || best._id || best.driverId });
+      }
+    };
+    socket.on('nearbyDrivers', handler);
+    return () => socket.off('nearbyDrivers', handler);
+  }, [pickup, drop, selectedRide, currentRideId]);
 
 
   // 🚖 Socket listeners
@@ -572,6 +715,91 @@ export default function Booking() {
     };
   }, []);
 
+  // Helper functions
+  const mapCodeToCategory = (code) => {
+    const mapping = {
+      'bike': 'bike',
+      'auto': 'auto', 
+      'car': 'car',
+      'premium': 'premium',
+      'parcel': 'parcel'
+    };
+    return mapping[code] || 'car';
+  };
+
+  const getIconForCode = (code) => {
+    switch (code) {
+      case 'bike': return '🏍️';
+      case 'auto': return '🛺';
+      case 'car': return '🚗';
+      case 'premium': return '🚙';
+      case 'parcel': return '📦';
+      default: return '🚗';
+    }
+  };
+
+  const getVehicleIcon = (code) => {
+    switch (code) {
+      case 'bike': return <TwoWheeler sx={{ fontSize: 40, color: 'success.main' }} />;
+      case 'auto': return <LocalTaxi sx={{ fontSize: 40, color: 'warning.main' }} />;
+      case 'car': return <DirectionsCar sx={{ fontSize: 40, color: 'primary.main' }} />;
+      case 'premium': return <Star sx={{ fontSize: 40, color: 'secondary.main' }} />;
+      case 'parcel': return <LocalShipping sx={{ fontSize: 40, color: 'info.main' }} />;
+      default: return <DirectionsCar sx={{ fontSize: 40, color: 'primary.main' }} />;
+    }
+  };
+
+  // Image src for vehicle types – using images from public/images/vehicles/
+  const getVehicleImage = (code) => {
+    const imageMap = {
+      'bike': '/images/vehicles/bike.png',
+      'scooty': '/images/vehicles/scooty.png',
+      'auto': '/images/vehicles/auto.png',
+      'auto_3': '/images/vehicles/auto.png',
+      'car': '/images/vehicles/car.png',
+      'car_4': '/images/vehicles/car.png',
+      'car_ac': '/images/vehicles/car-ac.png',
+      'car_6': '/images/vehicles/car-6seats.png',
+      'premium': '/images/vehicles/premium.svg',
+      'parcel': '/images/vehicles/parcel.png'
+    };
+    return imageMap[code] || `/images/vehicles/car.png`;
+  };
+
+  const getColorForCode = (code) => {
+    switch (code) {
+      case 'bike': return 'success';
+      case 'auto': return 'warning';
+      case 'car': return 'primary';
+      case 'premium': return 'secondary';
+      case 'parcel': return 'info';
+      default: return 'primary';
+    }
+  };
+
+  const estimatePriceForCode = (code, dist = distance) => {
+    const km = dist ? parseFloat(dist) : 5;
+    switch (code) {
+      case 'bike': return (km * 10).toFixed(0);
+      case 'auto': return (km * 15).toFixed(0);
+      case 'car': return (km * 20).toFixed(0);
+      case 'premium': return (km * 30).toFixed(0);
+      case 'parcel': return (km * 12).toFixed(0);
+      default: return (km * 20).toFixed(0);
+    }
+  };
+
+  const displayNameForCode = (code) => {
+    switch (code) {
+      case 'bike': return 'Bike';
+      case 'auto': return 'Auto';
+      case 'car': return 'Car';
+      case 'premium': return 'Premium';
+      case 'parcel': return 'Parcel';
+      default: return 'Car';
+    }
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: { xs: 1, md: 3 } }}>
       <Box sx={{ 
@@ -586,7 +814,6 @@ export default function Booking() {
         }}>
           <Typography variant={isMobile ? "body1" : "h6"} sx={{ 
             mb: { xs: 1.5, md: 2 },
-            fontWeight: 700,
             display: 'flex',
             alignItems: 'center',
             gap: 1
@@ -595,7 +822,7 @@ export default function Booking() {
             <Chip label="User" size="small" sx={{ ml: 0.5 }} />
           </Typography>
 
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Find a trip
           </Typography>
 
@@ -668,8 +895,7 @@ export default function Booking() {
           {/* Vehicle Selection - Desktop: show inline after drop; Mobile handled by bottom sheet */}
           {drop && !showDriverDetails && !isMobile && (
             <>
-              <Typography variant="subtitle1" sx={{ 
-                fontWeight: 700, 
+              <Typography variant="subtitle1" component="div" sx={{ 
                 mb: 1.5, 
                 mt: 2,
                 color: 'text.primary',
@@ -690,7 +916,7 @@ export default function Booking() {
               
               {/* Uber-style section header */}
               <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.5 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Economy</Typography>
+                <Typography variant="subtitle2">Economy</Typography>
                 <Typography variant="caption" color="text.secondary">quality drivers</Typography>
               </Box>
 
@@ -720,19 +946,29 @@ export default function Booking() {
                       sx={{
                         cursor: 'pointer',
                         border: selectedRide === code ? '2px solid' : '1px solid',
-                        borderColor: selectedRide === code ? 'black' : 'grey.300',
-                        transition: 'all 0.2s',
-                        '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                        borderColor: selectedRide === code ? 'black' : 'grey.300'
                       }}
                     >
                       <CardContent sx={{ p: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                            <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
-                              {icon}
+                            <Avatar 
+                              src={getVehicleImage(code)} 
+                              sx={{ 
+                                mr: 1, 
+                                width: 48, 
+                                height: 48,
+                                bgcolor: 'grey.100',
+                                '& img': {
+                                  objectFit: 'contain',
+                                  padding: '8px'
+                                }
+                              }}
+                            >
+                              {getVehicleIcon(code)}
                             </Avatar>
                             <Box sx={{ flex: 1 }}>
-                              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                              <Typography variant="body2" sx={{ mb: 0.25 }}>
                                 {t.name || 'Car'}
                               </Typography>
                               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
@@ -744,7 +980,7 @@ export default function Booking() {
                             </Box>
                           </Box>
                           <Box sx={{ textAlign: 'right' }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                            <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
                               {price}
                             </Typography>
                           </Box>
@@ -762,19 +998,20 @@ export default function Booking() {
                     sx={{
                       cursor: 'pointer',
                       border: '1px solid',
-                      borderColor: 'grey.300',
-                      transition: 'all 0.2s',
-                      '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                      borderColor: 'grey.300'
                     }}
                   >
                     <CardContent sx={{ p: 1 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                          <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
+                          <Avatar 
+                            src={getVehicleImage('parcel')} 
+                            sx={{ mr: 1, width: 36, height: 36 }}
+                          >
                             <ShoppingBag />
                           </Avatar>
                           <Box sx={{ flex: 1 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                            <Typography variant="body2" sx={{ mb: 0.25 }}>
                               Parcel
                             </Typography>
                             <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
@@ -786,7 +1023,7 @@ export default function Booking() {
                           </Box>
                         </Box>
                         <Box sx={{ textAlign: 'right' }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'success.main' }}>
+                          <Typography variant="subtitle2" sx={{ color: 'success.main' }}>
                             View
                           </Typography>
                         </Box>
@@ -833,7 +1070,6 @@ export default function Booking() {
               boxShadow: 2
             }}>
               <Typography variant="h6" sx={{ 
-                fontWeight: 'bold', 
                 mb: 1,
                 display: 'flex',
                 alignItems: 'center',
@@ -855,7 +1091,7 @@ export default function Booking() {
                   <DirectionsCar />
                 </Avatar>
                 <Box>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                  <Typography variant="h6">
                     {activeRide.captainId?.fullName || 'Driver'}
                   </Typography>
                   <Typography variant="body2" sx={{ opacity: 0.9 }}>
@@ -883,14 +1119,12 @@ export default function Booking() {
                 }}>
                   <Typography variant="body2" sx={{ 
                     color: '#ff8f00', 
-                    fontWeight: 'bold',
                     mb: 1
                   }}>
                     Verification Code
                   </Typography>
                   <Typography variant="h4" sx={{ 
                     color: '#e65100', 
-                    fontWeight: 'bold',
                     fontFamily: 'monospace',
                     letterSpacing: '0.2em'
                   }}>
@@ -933,7 +1167,6 @@ export default function Booking() {
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontSize: '0.75rem',
-                            fontWeight: 'bold',
                             border: '2px solid white'
                           }}
                         >
@@ -1032,89 +1265,97 @@ export default function Booking() {
       )}
 
       
-      {/* Mobile bottom sheet: pops from below after drop is set */}
-      <Drawer
-        anchor="bottom"
-        open={Boolean(isMobile && drop && !showDriverDetails && bottomSheetVisible)}
-        onClose={(e, reason) => {
-          // Collapse to regular size on backdrop or escape
-          if (reason === 'backdropClick' || reason === 'escapeKeyDown') {
+      {/* Backdrop */}
+      {isMobile && drop && !showDriverDetails && bottomSheetVisible && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1299,
+            opacity: sheetExpanded ? 1 : 0,
+            transition: 'opacity 0.3s ease',
+            pointerEvents: sheetExpanded ? 'auto' : 'none'
+          }}
+          onClick={() => {
             setSheetExpanded(false);
             setBottomSheetVisible(false);
-            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
-          }
-        }}
-        PaperProps={{
-          sx: {
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-            boxShadow: 6,
-            height: sheetExpanded ? '85vh' : '35vh',
-            maxHeight: '90vh',
+          }}
+        />
+      )}
+
+      {/* Uber-like Mobile Bottom Sheet */}
+      {isMobile && drop && !showDriverDetails && bottomSheetVisible && (
+        <Box
+          ref={bottomSheetRef}
+          sx={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: sheetExpanded ? '85vh' : '40vh',
+            backgroundColor: 'white',
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
             display: 'flex',
             flexDirection: 'column',
-            transition: 'height 0.2s ease'
-          }
-        }}
-      >
-        {/* drag handle / tap area */}
-        <Box
-          sx={{ display: 'flex', justifyContent: 'center', pt: 1, cursor: 'pointer' }}
-          onClick={() => setSheetExpanded(prev => !prev)}
-        >
-          <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: 'grey.400' }} />
-        </Box>
-        <Box
-          sx={{ p: 2, pt: 1, overflowY: 'auto', flex: 1 }}
-          onScroll={(e) => {
-            try {
-              const top = e.currentTarget.scrollTop;
-              if (top > 24 && !sheetExpanded) setSheetExpanded(true);
-            } catch (_) {}
+            transition: 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            zIndex: 1300,
+            overflow: 'hidden'
           }}
+          onClick={(e) => e.stopPropagation()}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, mb: 1 }}>
+          {/* Drag handle */}
+          <Box
+            sx={{
+              width: 40,
+              height: 4,
+              bgcolor: 'grey.400',
+              borderRadius: 2,
+              mx: 'auto',
+              mt: 1.5,
+              mb: 1,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'grey.500',
+                transform: 'scaleX(1.2)'
+              },
+              '&:active': {
+                transform: 'scale(0.9)'
+              }
+            }}
+            onClick={() => setSheetExpanded(!sheetExpanded)}
+          />
+        
+        <Box ref={scrollableContentRef} sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
             <Typography
-              variant="subtitle1"
+              variant="h6"
               component="div"
-              sx={{ fontWeight: 700, cursor: sheetExpanded ? 'pointer' : 'default' }}
-              onClick={() => { if (sheetExpanded) setSheetExpanded(false); }}
             >
               Choose a ride
             </Typography>
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => {
-                setSheetExpanded(false);
-                setBottomSheetVisible(false);
-                try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) {}
-                // Focus drop input for quick edits
-                try { dropInputRef.current?.focus(); } catch (_) {}
-              }}
-            >
-              Edit locations
-            </Button>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 1 }}>
-            <Chip label="Pick up now" size="small" variant="outlined" />
-            <Chip label="For me" size="small" variant="outlined" />
-          </Box>
+          
 
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 0.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Economy</Typography>
-            <Typography variant="caption" color="text.secondary">quality drivers</Typography>
-          </Box>
+
+          
+
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {typesLoading && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, py: 2 }}>
                 <CircularProgress size={20} />
                 <Typography variant="body2">Loading vehicle types…</Typography>
               </Box>
             )}
             {typesError && (
-              <Alert severity="error">{typesError}</Alert>
+              <Alert severity="error" sx={{ mx: 1 }}>{typesError}</Alert>
             )}
 
             {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
@@ -1131,32 +1372,51 @@ export default function Booking() {
                   sx={{
                     cursor: 'pointer',
                     border: selectedRide === code ? '2px solid' : '1px solid',
-                    borderColor: selectedRide === code ? 'black' : 'grey.300',
-                    transition: 'all 0.2s',
-                    '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                    borderColor: selectedRide === code ? 'primary.main' : 'grey.300',
+                    '&:hover': { borderColor: 'primary.main' }
                   }}
                 >
-                  <CardContent sx={{ p: 1 }}>
+                  <CardContent sx={{ p: 1.5 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                        <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
-                          {icon}
-                        </Avatar>
+                          <Avatar 
+                            src={getVehicleImage(code)} 
+                            sx={{ 
+                              mr: 1.5, 
+                              width: 56, 
+                              height: 56,
+                              bgcolor: 'grey.100',
+                              '& img': {
+                                objectFit: 'contain',
+                                padding: '10px'
+                              }
+                            }}
+                          >
+                            {getVehicleIcon(code)}
+                          </Avatar>
                         <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                          <Typography variant="subtitle2" sx={{ mb: 0.25 }}>
                             {t.name || 'Car'}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
                             {description}
                           </Typography>
-                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                            <Chip icon={<AccessTime />} label={`${etaMin} min`} size="small" variant="outlined" />
+                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                            <Chip 
+                              icon={<AccessTime />} 
+                              label={`${etaMin} min`} 
+                              size="small" 
+                              variant="outlined"
+                            />
                           </Box>
                         </Box>
                       </Box>
                       <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                        <Typography variant="subtitle2">
                           {price}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          estimated
                         </Typography>
                       </Box>
                     </Box>
@@ -1172,19 +1432,29 @@ export default function Booking() {
                 sx={{
                   cursor: 'pointer',
                   border: '1px solid',
-                  borderColor: 'grey.300',
-                  transition: 'all 0.2s',
-                  '&:hover': { transform: 'translateY(-1px)', boxShadow: 2 }
+                  borderColor: 'grey.300'
                 }}
               >
                 <CardContent sx={{ p: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                      <Avatar sx={{ bgcolor: 'success.main', mr: 1, width: 36, height: 36, animation: `${pulse} 2s ease-in-out infinite` }}>
+                      <Avatar 
+                        src={getVehicleImage('parcel')} 
+                        sx={{ 
+                          mr: 1, 
+                          width: 48, 
+                          height: 48,
+                          bgcolor: 'grey.100',
+                          '& img': {
+                            objectFit: 'contain',
+                            padding: '8px'
+                          }
+                        }}
+                      >
                         <ShoppingBag />
                       </Avatar>
                       <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                        <Typography variant="body2" sx={{ mb: 0.25 }}>
                           Parcel
                         </Typography>
                         <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
@@ -1196,7 +1466,7 @@ export default function Booking() {
                       </Box>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                      <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
                         View
                       </Typography>
                     </Box>
@@ -1208,16 +1478,19 @@ export default function Booking() {
 
           {/* Payment method - Cash (for future use) */}
           <Box sx={{ mt: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>Payment</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Payment</Typography>
             <Card sx={{ border: '1px solid', borderColor: 'grey.300' }}>
               <CardContent sx={{ p: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Avatar sx={{ bgcolor: 'success.main', width: 32, height: 32 }}>
+                    <Avatar 
+                      src="/images/vehicles/cash.svg" 
+                      sx={{ width: 32, height: 32 }}
+                    >
                       <AttachMoney />
                     </Avatar>
                     <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 700 }}>Cash</Typography>
+                      <Typography variant="body2">Cash</Typography>
                       <Typography variant="caption" color="text.secondary">Pay with cash</Typography>
                     </Box>
                   </Box>
@@ -1227,29 +1500,33 @@ export default function Booking() {
             </Card>
           </Box>
 
+          {/* Request button */}
           <Button
-            fullWidth
             variant="contained"
+            fullWidth
             disabled={!drop || !selectedRide || lookingForRider}
-            sx={{
-              bgcolor: selectedRide && !lookingForRider ? 'black' : 'grey.400',
-              '&:hover': { bgcolor: selectedRide && !lookingForRider ? '#333' : 'grey.400' },
-              mt: 2,
+            onClick={handleFindRiders}
+            sx={{ 
+              mt: 2, 
               py: 1.5
             }}
-            onClick={handleFindRiders}
-            startIcon={lookingForRider ? <CircularProgress size={20} color="inherit" /> : null}
           >
-            {lookingForRider
-              ? 'Looking for drivers...'
-              : !drop
-                ? 'Set drop location first'
-                : selectedRide
-                  ? `Request ${displayNameForCode(selectedRide)}`
-                  : 'Select Vehicle Type First'}
+            {lookingForRider ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1 }} color="inherit" />
+                Looking for drivers...
+              </>
+            ) : !drop ? (
+              "Set drop location first"
+            ) : !selectedRide ? (
+              "Select Vehicle Type First"
+            ) : (
+              `Request ${vehicleTypes.find(v => (v.code || v.name?.toLowerCase()) === selectedRide)?.name || selectedRide}`
+            )}
           </Button>
         </Box>
-      </Drawer>
+      </Box>
+      )}
 
       {/* Rider details drawer */}
       <Drawer 
@@ -1275,7 +1552,7 @@ export default function Booking() {
                   borderRadius: 2, 
                   mr: 2 
                 }} />
-                <Typography variant="h5" sx={{ fontWeight: "bold" }}>
+                <Typography variant="h5">
                   Your driver is on the way! 🚗
                 </Typography>
               </Box>
@@ -1293,7 +1570,7 @@ export default function Booking() {
                       {assignedRider.fullName?.charAt(0) || 'D'}
                     </Avatar>
                     <Box sx={{ flex: 1 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                      <Typography variant="h6">
                         {assignedRider.fullName}
                       </Typography>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1319,7 +1596,7 @@ export default function Booking() {
 
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                     <Typography variant="body2" color="text.secondary">Estimated Fare</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                    <Typography variant="h6" sx={{ color: 'primary.main' }}>
                       {rideOptions.find((r) => r.id === selectedRide)?.price}
               </Typography>
                   </Box>
@@ -1330,7 +1607,6 @@ export default function Booking() {
                       label={rideStatus} 
                       color="success" 
                       size="small"
-                      sx={{ fontWeight: 'bold' }}
                     />
                   </Box>
                 </CardContent>
@@ -1383,54 +1659,3 @@ export default function Booking() {
     </Container>
   );
 }
-  // 🔁 Map vehicle type code to ride category accepted by backend
-  const mapCodeToCategory = (code) => {
-    if (!code) return "car";
-    if (code.includes("bike") || code.includes("scooty")) return "bike";
-    if (code.includes("auto")) return "auto";
-    if (code.includes("car")) return "car";
-    return "car";
-  };
-
-  const getIconForCode = (code) => {
-    const lower = (code || '').toLowerCase();
-    if (lower.includes('parcel')) return <ShoppingBag />;
-    if (lower.includes('bike') || lower.includes('scooty')) return <TwoWheeler />;
-    if (lower.includes('auto')) return <LocalTaxi />;
-    if (lower.includes('car_6') || lower.includes('station')) return <AirportShuttle />;
-    if (lower.includes('car_ac') || lower.includes('snow')) {
-      return (
-        <Box sx={{ position: 'relative' }}>
-          <DirectionsCar />
-          <AcUnit sx={{ position: 'absolute', right: -6, top: -4, fontSize: 14 }} />
-        </Box>
-      );
-    }
-    return <DirectionsCar />;
-  };
-
-  const getColorForCode = (code) => {
-    return "success";
-  };
-
-  const estimatePriceForCode = (code, km) => {
-    const d = km || 5;
-    if (code.includes("bike") || code.includes("scooty")) return `₹${(d * 10).toFixed(2)}`;
-    if (code.includes("auto")) return `₹${(d * 15).toFixed(2)}`;
-    if (code.includes("car_ac")) return `₹${(d * 22).toFixed(2)}`;
-    if (code.includes("car_6")) return `₹${(d * 25).toFixed(2)}`;
-    if (code.includes("car_4")) return `₹${(d * 20).toFixed(2)}`;
-    return `₹${(d * 20).toFixed(2)}`;
-  };
-
-  // Display name for button label
-  const displayNameForCode = (code) => {
-    const lower = (code || '').toLowerCase();
-    if (lower.includes('bike') || lower.includes('scooty')) return 'Uber Bike';
-    if (lower.includes('auto')) return 'Uber Auto';
-    if (lower.includes('car_6')) return 'XL';
-    if (lower.includes('car_ac')) return 'Uber Go AC';
-    if (lower.includes('car') || lower.includes('car_4')) return 'Uber Go';
-    return 'Ride';
-  };
-      {/* Mobile bottom sheet: pops from below after drop is set */}

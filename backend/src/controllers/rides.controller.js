@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Payment = require("../models/Payment");
 const Notification = require("../models/Notification");
 const { calculateFare, calculateDistance, validateCoordinates, calculateETA, calculateSurgeMultiplier } = require("../utils/rideUtils");
+const { findBestRiders, getNearbyRidersWithDetails } = require("../services/matchmaking.service");
 
 // Generate OTP for ride verification
 const generateOTP = () => {
@@ -91,30 +92,153 @@ exports.createRide = async (req, res) => {
       priority: "high"
     });
 
-    // 🔥 notify only online riders
+    // 🔥 Smart matchmaking: find best riders for this ride
     const io = req.app.get("io");
     
-    // Get all online riders
-    const onlineRiders = await User.find({ 
-      role: "rider", 
-      isOnline: true,
-      approvalStatus: "approved"
-    });
+    console.log(`🔍 Starting smart matchmaking for ride type: ${rideType}`);
+    console.log(`📍 Pickup: ${pickup} (${pickupCoords.lat}, ${pickupCoords.lng})`);
+    console.log(`📍 Drop: ${drop} (${dropCoords.lat}, ${dropCoords.lng})`);
     
-    console.log(`🚗 Notifying ${onlineRiders.length} online riders about new ride request`);
-    
-    // Emit to all online riders
-    onlineRiders.forEach(rider => {
-      io.to(`rider_${rider._id}`).emit("rideRequest", {
-        ...ride.toObject(),
-        rider: {
-          _id: req.user._id,
-          fullName: req.user.fullName,
-          mobile: req.user.mobile,
-          rating: req.user.rating
-        }
+    try {
+      // Find best matching riders using our matchmaking algorithm
+      const bestRiders = await findBestRiders({
+        pickupCoords: pickupCoords,
+        dropCoords: dropCoords,
+        rideType: rideType,
+        distance: distance,
+        rideId: ride._id
+      }, {
+        maxResults: 10, // Notify top 10 riders
+        maxDistance: 15, // 15km radius
+        expandOnNoMatch: true // Expand search if no matches
       });
-    });
+      
+      console.log(`✅ Found ${bestRiders.length} matching riders`);
+      
+      if (bestRiders.length === 0) {
+        console.warn("⚠️ No matching riders found, no notifications sent");
+      } else {
+        // Notify only the best matching riders
+        bestRiders.forEach((matchedRider, index) => {
+          const riderId = matchedRider._id.toString();
+          const riderMobile = matchedRider.mobile || '';
+          console.log(`📱 Notifying rider ${index + 1}/${bestRiders.length}`);
+          console.log(`   ID: ${riderId}`);
+          console.log(`   Name: ${matchedRider.fullName || matchedRider.firstName || matchedRider.mobile || 'Unknown'}`);
+          console.log(`   Mobile: ${riderMobile}`);
+          console.log(`   Distance: ${matchedRider.distance?.toFixed(2) || 'N/A'}km, Score: ${matchedRider.score?.toFixed(2) || 'N/A'}`);
+          
+          const rideData = {
+            ...ride.toObject(),
+            rider: {
+              _id: req.user._id,
+              fullName: req.user.fullName,
+              mobile: req.user.mobile,
+              rating: req.user.rating
+            },
+            matchDetails: {
+              distance: matchedRider.distance,
+              eta: matchedRider.eta,
+              score: matchedRider.score
+            }
+          };
+          
+          // 🔧 FIX: Emit to MULTIPLE room IDs to handle ID mismatches
+          const roomIds = [
+            riderId,              // User collection ID
+            riderMobile,          // Mobile number as room ID
+            `rider_${riderId}`,   // With prefix
+            `user_${riderId}`     // Alternative prefix
+          ];
+          
+          console.log(`   📤 Emitting to rooms:`, roomIds);
+          roomIds.forEach(roomId => {
+            io.to(roomId).emit("rideRequest", rideData);
+          });
+          
+          console.log(`   ✅ Emitted to ${roomIds.length} room IDs`);
+        });
+        
+        console.log(`✅ Successfully notified ${bestRiders.length} riders about the new ride request`);
+      }
+      
+    } catch (matchmakingError) {
+      console.error("❌ Matchmaking error:", matchmakingError);
+      
+      // Fallback: notify all online riders if matchmaking fails
+      console.log("🔄 Falling back to broadcasting to all online riders");
+      
+      // Try User collection first
+      let onlineRiders = await User.find({ 
+        role: "rider", 
+        isOnline: true
+      });
+      
+      console.log(`🚗 Found ${onlineRiders.length} riders in User collection`);
+      console.log(`🚗 Riders:`, onlineRiders.map(r => ({
+        id: r._id.toString(),
+        name: r.fullName,
+        mobile: r.mobile,
+        vehicle: r.vehicleType,
+        online: r.isOnline,
+        location: r.currentLocation ? `${r.currentLocation.lat}, ${r.currentLocation.lng}` : 'NO LOCATION'
+      })));
+      
+      // If no riders in User collection, try Rider collection
+      if (onlineRiders.length === 0) {
+        try {
+          const Rider = require("../models/Rider");
+          onlineRiders = await Rider.find({
+            isOnline: true
+          });
+          console.log(`🚗 Found ${onlineRiders.length} riders in Rider collection`);
+        } catch (err) {
+          console.error("❌ Error fetching from Rider collection:", err);
+        }
+      }
+      
+      console.log(`🚗 Notifying ${onlineRiders.length} online riders as fallback`);
+      
+      if (onlineRiders.length > 0) {
+        onlineRiders.forEach((rider, index) => {
+          const riderId = rider._id.toString();
+          const riderName = rider.fullName || (rider.firstName && rider.lastName ? `${rider.firstName} ${rider.lastName}` : rider.firstName || rider.mobile || 'Unknown');
+          
+          console.log(`📱 [${index + 1}/${onlineRiders.length}] Notifying rider:`);
+          console.log(`   - ID: ${riderId}`);
+          console.log(`   - Name: ${riderName}`);
+          console.log(`   - Mobile: ${rider.mobile || 'N/A'}`);
+          
+          // Emit to socket room
+          const rideData = {
+            _id: ride._id,
+            pickup: ride.pickup,
+            drop: ride.drop,
+            pickupCoords: ride.pickupCoords,
+            dropCoords: ride.dropCoords,
+            rideType: ride.rideType,
+            totalFare: ride.totalFare,
+            distance: ride.distance,
+            duration: ride.duration,
+            status: ride.status,
+            rider: {
+              _id: req.user._id,
+              fullName: req.user.fullName,
+              mobile: req.user.mobile,
+              rating: req.user.rating || 4.6
+            },
+            createdAt: ride.createdAt
+          };
+          
+          console.log(`   📤 Emitting rideRequest to room: ${riderId}`);
+          io.to(riderId).emit("rideRequest", rideData);
+          console.log(`   ✅ Emitted successfully`);
+        });
+      } else {
+        console.warn("⚠️ No online riders found in any collection to notify");
+        console.warn("⚠️ This means no riders will receive the ride request");
+      }
+    }
 
     res.json({ 
       success: true, 

@@ -10,6 +10,8 @@ import {
   rejectRider,
   getSOSAlerts,
   resolveSOS,
+  getVehicleTypeStats,
+  getRidersByVehicleType,
 } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -58,6 +60,8 @@ export default function AdminDashboard() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [vehicleStats, setVehicleStats] = useState([]);
+  const [selectedVehicleType, setSelectedVehicleType] = useState(null);
 
   const [openDocsModal, setOpenDocsModal] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState({});
@@ -70,6 +74,18 @@ export default function AdminDashboard() {
     license: "License",
     panCard: "PAN Card",
     rc: "RC",
+  };
+
+  // Function to get vehicle image based on vehicle type
+  const getVehicleImage = (vehicleType) => {
+    const lower = vehicleType.toLowerCase();
+    if (lower.includes('bike')) return '/images/vehicles/bike.png';
+    if (lower.includes('scooty')) return '/images/vehicles/scooty.png';
+    if (lower.includes('auto')) return '/images/vehicles/auto.png';
+    if (lower.includes('car_ac') || lower.includes('car with ac')) return '/images/vehicles/car-ac.png';
+    if (lower.includes('car_6') || lower.includes('6 seats')) return '/images/vehicles/car-6seats.png';
+    if (lower.includes('car')) return '/images/vehicles/car.png';
+    return '/images/vehicles/car.png'; // default
   };
 
   const fetchOverview = async () => {
@@ -88,8 +104,19 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchData = async (type) => {
+  const fetchVehicleStats = async () => {
+    try {
+      const res = await getVehicleTypeStats();
+      setVehicleStats(res.data.vehicleStats || []);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load vehicle statistics");
+    }
+  };
+
+  const fetchData = async (type, vehicleType = null) => {
     setActiveTab(type);
+    setSelectedVehicleType(vehicleType);
     setLoading(true);
     setError("");
     try {
@@ -112,6 +139,14 @@ export default function AdminDashboard() {
           break;
         case "sos":
           res = await getSOSAlerts();
+          break;
+        case "vehicle-riders":
+          if (vehicleType) {
+            res = await getRidersByVehicleType(vehicleType);
+            setData(res?.data?.riders || []);
+            setLoading(false);
+            return;
+          }
           break;
         default:
           res = { data: { data: [] } };
@@ -174,6 +209,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchOverview();
+    fetchVehicleStats();
   }, []);
 
   const cards = [
@@ -243,31 +279,115 @@ export default function AdminDashboard() {
 
         {/* Overview Cards */}
         {activeTab === "overview" && (
-          <Grid container spacing={3}>
-            {cards.map((card) => (
-              <Grid item xs={12} sm={6} md={3} key={card.label}>
-                <Card
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    p: 2,
-                    borderRadius: 3,
-                    boxShadow: 3,
-                    transition: "0.3s",
-                    "&:hover": { boxShadow: 6, transform: "translateY(-5px)" },
-                  }}
-                  onClick={() => card.type !== "overview" && fetchData(card.type)}
-                >
-                  <Box>
-                    <Typography variant="subtitle1" fontWeight="bold" color={card.color}>{card.label}</Typography>
-                    <Typography variant="h4" fontWeight="bold" color={card.color}>{card.value}</Typography>
-                  </Box>
-                  <Box sx={{ fontSize: 50, color: card.color }}>{card.icon}</Box>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
+          <>
+            <Grid container spacing={3}>
+              {cards.map((card) => (
+                <Grid item xs={12} sm={6} md={3} key={card.label}>
+                  <Card
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      p: 2,
+                      borderRadius: 3,
+                      boxShadow: 3,
+                      transition: "0.3s",
+                      "&:hover": { boxShadow: 6, transform: "translateY(-5px)" },
+                    }}
+                    onClick={() => card.type !== "overview" && fetchData(card.type)}
+                  >
+                    <Box>
+                      <Typography variant="subtitle1" fontWeight="bold" color={card.color}>{card.label}</Typography>
+                      <Typography variant="h4" fontWeight="bold" color={card.color}>{card.value}</Typography>
+                    </Box>
+                    <Box sx={{ fontSize: 50, color: card.color }}>{card.icon}</Box>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+
+            {/* Vehicle Type Tiles */}
+            {vehicleStats.length > 0 && (
+              <Box mt={4}>
+                <Typography variant="h5" mb={3} fontWeight="bold" color="primary">
+                  Riders by Vehicle Type
+                </Typography>
+                <Grid container spacing={3}>
+                  {vehicleStats.map((vehicle) => (
+                    <Grid item xs={12} sm={6} md={4} lg={3} key={vehicle.vehicleType}>
+                      <Card
+                        sx={{
+                          p: 3,
+                          borderRadius: 3,
+                          boxShadow: 3,
+                          transition: "0.3s",
+                          cursor: "pointer",
+                          "&:hover": { 
+                            boxShadow: 6, 
+                            transform: "translateY(-5px)",
+                            bgcolor: "#f8f9fa"
+                          },
+                        }}
+                        onClick={() => fetchData("vehicle-riders", vehicle.vehicleType)}
+                      >
+                        <Box display="flex" flexDirection="column" alignItems="center" textAlign="center">
+                          <Box
+                            component="img"
+                            src={getVehicleImage(vehicle.vehicleType)}
+                            alt={vehicle.vehicleType}
+                            sx={{
+                              width: 60,
+                              height: 60,
+                              mb: 2,
+                              objectFit: "contain"
+                            }}
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                            }}
+                          />
+                          <Typography variant="h6" fontWeight="bold" color="primary" mb={1}>
+                            {vehicle.vehicleType}
+                          </Typography>
+                          <Typography variant="h4" fontWeight="bold" color="success.main" mb={1}>
+                            {vehicle.total}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" mb={1}>
+                            Total Riders
+                          </Typography>
+                          <Box display="flex" justifyContent="space-between" width="100%" mt={2}>
+                            <Box textAlign="center">
+                              <Typography variant="body2" fontWeight="bold" color="success.main">
+                                {vehicle.approved}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Approved
+                              </Typography>
+                            </Box>
+                            <Box textAlign="center">
+                              <Typography variant="body2" fontWeight="bold" color="warning.main">
+                                {vehicle.pending}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Pending
+                              </Typography>
+                            </Box>
+                            <Box textAlign="center">
+                              <Typography variant="body2" fontWeight="bold" color="error.main">
+                                {vehicle.rejected}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Rejected
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </Box>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+            )}
+          </>
         )}
 
         {/* Loading/Error */}

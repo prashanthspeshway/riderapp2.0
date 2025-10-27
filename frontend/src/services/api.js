@@ -167,6 +167,13 @@ export const resolveSOS = (id) =>
 // --- Vehicle Types ---
 export const getVehicleTypes = () => axios.get(`${API_BASE}/api/vehicle-types`);
 
+// Vehicle type specific APIs
+export const getVehicleTypeStats = () => RIDERS_API.get('/riders/stats/vehicle-types');
+export const getRidersByVehicleType = (vehicleType, params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  return RIDERS_API.get(`/riders/vehicle-type/${vehicleType}${queryString ? `?${queryString}` : ''}`);
+};
+
 // Create a default API instance with token handling
 const api = axios.create({
   baseURL: `${API_BASE}/api`,
@@ -210,6 +217,8 @@ const apiService = {
   resolveSOS,
   getAllUsers,
   getVehicleTypes,
+  getVehicleTypeStats,
+  getRidersByVehicleType,
   // Rider management
   updateRiderStatus: (riderId, data) => ADMIN_API.put(`/riders/${riderId}/status`, data),
   // Add the default axios instance for general API calls
