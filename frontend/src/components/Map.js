@@ -320,8 +320,8 @@ export default function Map({
         />
       )}
 
-      {/* 🚗 Online Riders Markers with Vehicle Icons */}
-      {onlineRiders && onlineRiders.length > 0 && (
+      {/* 🚗 Online Riders Markers with Vehicle Icons - Only show if pickup/drop not set */}
+      {onlineRiders && onlineRiders.length > 0 && !pickup && !drop && (
         <>
           {onlineRiders.map((rider) => {
             console.log('📍 Rendering rider marker:', rider);
