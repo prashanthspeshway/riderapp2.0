@@ -279,9 +279,9 @@ exports.acceptRide = async (req, res) => {
     const ride = await Ride.findOneAndUpdate(
       { _id: rideId, status: "pending" },
       { 
-        status: "accepted", 
-        captainId: req.user._id,
-        acceptedAt: new Date(),
+        captainId: req.user._id,  // Assign the driver who accepted
+        status: "accepted",       // Update status to accepted
+        acceptedAt: new Date(),   // Timestamp when accepted
         otp: otp,
         otpGeneratedAt: new Date(),
         otpVerified: false
