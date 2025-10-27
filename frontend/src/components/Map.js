@@ -87,6 +87,62 @@ export default function Map({
     libraries: LIBRARIES, // ✅ Static libraries array to fix performance warning
   });
 
+  // 🗺️ Custom map styling to remove clutter and show only essential hotspots
+  const mapStyles = [
+    {
+      featureType: "poi",
+      elementType: "labels",
+      stylers: [{ visibility: "off" }] // Hide all POI labels
+    },
+    {
+      featureType: "poi",
+      elementType: "geometry",
+      stylers: [{ visibility: "off" }] // Hide all POI icons (restaurants, shops, etc.)
+    },
+    {
+      featureType: "transit",
+      elementType: "labels",
+      stylers: [{ visibility: "off" }] // Hide transit labels
+    },
+    {
+      featureType: "transit",
+      elementType: "geometry",
+      stylers: [{ visibility: "off" }] // Hide transit stations
+    },
+    {
+      featureType: "administrative",
+      elementType: "labels",
+      stylers: [{ visibility: "simplified" }] // Simplify administrative labels
+    },
+    {
+      featureType: "road",
+      elementType: "labels",
+      stylers: [{ visibility: "simplified" }] // Simplify road labels
+    },
+    {
+      elementType: "geometry",
+      stylers: [{ color: "#e9e5e1" }] // Light background color
+    },
+    {
+      elementType: "labels.text.fill",
+      stylers: [{ color: "#5f5f5f" }] // Dark gray text
+    },
+    {
+      elementType: "labels.text.stroke",
+      stylers: [{ color: "#ffffff" }] // White stroke for text
+    },
+    {
+      featureType: "water",
+      elementType: "geometry",
+      stylers: [{ color: "#c9c9c9" }] // Light gray water
+    },
+    {
+      featureType: "landscape",
+      elementType: "geometry",
+      stylers: [{ color: "#f0f0f0" }] // Very light gray landscape
+    }
+  ];
+
   // ✅ Reverse geocode
   const getAddressFromCoords = async (lat, lng, cb) => {
     try {
@@ -194,6 +250,7 @@ export default function Map({
         rotateControl: false,          // Removes rotate control
         scaleControl: false,           // Hide scale bar
         clickableIcons: false,         // Prevent info window from opening
+        styles: mapStyles              // Apply custom styles to remove clutter
       }}
       onLoad={(map) => {
         mapRef.current = map;
