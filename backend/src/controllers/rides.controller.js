@@ -524,6 +524,66 @@ exports.getRideById = async (req, res) => {
   }
 };
 
+// 🚗 Arrive at Pickup
+exports.arriveAtPickup = async (req, res) => {
+  try {
+    const rideId = req.params.id;
+    
+    if (req.user.role !== "rider") {
+      return res.status(403).json({ success: false, message: "Only riders can mark arrival" });
+    }
+
+    const ride = await Ride.findOneAndUpdate(
+      { _id: rideId, captainId: req.user._id, status: "accepted" },
+      { 
+        status: "arrived",
+        arrivedAt: new Date()
+      },
+      { new: true }
+    ).populate("riderId", "fullName mobile");
+
+    if (!ride) {
+      return res.status(404).json({
+        success: false,
+        message: "Ride not found or cannot be marked as arrived"
+      });
+    }
+
+    // Create notification
+    await Notification.create({
+      userId: ride.riderId._id,
+      type: "rider_arrived",
+      title: "Your rider has arrived! 🎉",
+      message: "Your driver has arrived at the pickup location. Please come outside.",
+      rideId: ride._id,
+      priority: "high"
+    });
+
+    const io = req.app.get("io");
+    io.to(ride.riderId._id.toString()).emit("riderArrived", {
+      _id: ride._id,
+      pickup: ride.pickup,
+      riderId: ride.riderId
+    });
+
+    console.log("✅ Rider arrived at pickup for ride:", rideId);
+    console.log("📱 Notified user:", ride.riderId._id.toString());
+
+    res.json({ 
+      success: true, 
+      ride,
+      message: "User has been notified of your arrival"
+    });
+  } catch (err) {
+    console.error("❌ Arrive at pickup error:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to mark arrival",
+      message: err.message 
+    });
+  }
+};
+
 // 🚗 Start Ride
 exports.startRide = async (req, res) => {
   try {

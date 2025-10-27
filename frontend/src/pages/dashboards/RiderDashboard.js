@@ -483,15 +483,60 @@ export default function RiderDashboard() {
     }
   };
 
-  const handleOTPVerified = (rideId) => {
+  const handleOTPVerified = async (rideId) => {
     console.log("✅ OTP verified for ride:", rideId);
     
-    if (selectedRide && selectedRide._id == rideId) {
-      setSelectedRide(prev => {
-        const updated = { ...prev, otpVerified: true, status: "started" };
-        return updated;
-      });
-    } else {
+    try {
+      // Fetch the complete ride details from backend
+      const response = await axios.get(
+        `http://localhost:5000/api/rides/${rideId}`,
+        { headers: { Authorization: `Bearer ${auth?.token}` } }
+      );
+      
+      if (response.data.success && response.data.ride) {
+        const fullRideData = response.data.ride;
+        console.log("📦 Full ride data after OTP verification:", fullRideData);
+        
+        // Update selected ride with complete data
+        setSelectedRide(fullRideData);
+        
+        // Show user's pickup location on map
+        if (fullRideData.pickupCoords) {
+          setPickup({
+            lat: fullRideData.pickupCoords.lat,
+            lng: fullRideData.pickupCoords.lng
+          });
+          setPickupAddress(fullRideData.pickup || "");
+        }
+        
+        if (fullRideData.dropCoords) {
+          setDrop({
+            lat: fullRideData.dropCoords.lat,
+            lng: fullRideData.dropCoords.lng
+          });
+          setDropAddress(fullRideData.drop || "");
+        }
+        
+        showSuccess("OTP verified! Navigate to user's pickup location.");
+      } else {
+        // Fallback to old behavior if fetch fails
+        if (selectedRide && selectedRide._id == rideId) {
+          setSelectedRide(prev => {
+            const updated = { ...prev, otpVerified: true, status: "started" };
+            return updated;
+          });
+        }
+        fetchPendingRides(true);
+      }
+    } catch (error) {
+      console.error("Error fetching ride details after OTP verification:", error);
+      // Fallback to old behavior
+      if (selectedRide && selectedRide._id == rideId) {
+        setSelectedRide(prev => {
+          const updated = { ...prev, otpVerified: true, status: "started" };
+          return updated;
+        });
+      }
       fetchPendingRides(true);
     }
     

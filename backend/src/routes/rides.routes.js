@@ -33,6 +33,9 @@ router.post("/:id/accept", authMiddleware, rideController.acceptRide);
 // 🚖 Reject a ride
 router.post("/:id/reject", authMiddleware, rideController.rejectRide);
 
+// 🚗 Arrive at pickup
+router.post("/:id/arrive", authMiddleware, rideController.arriveAtPickup);
+
 // 🚗 Start a ride
 router.post("/:id/start", authMiddleware, rideController.startRide);
 
