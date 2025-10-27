@@ -643,10 +643,10 @@ export default function RiderDashboard() {
       }}>
         <Map 
           apiKey={GOOGLE_API_KEY}
-          pickup={null}
-          setPickup={() => {}}
-          setPickupAddress={() => {}}
-          drop={null}
+          pickup={pickup}
+          setPickup={setPickup}
+          setPickupAddress={setPickupAddress}
+          drop={drop}
           setDrop={() => {}}
           setDropAddress={() => {}}
           riderLocation={riderLocation}
