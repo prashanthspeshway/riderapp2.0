@@ -835,6 +835,7 @@ export default function Booking() {
               setRoute={setRoute}
               setDistance={setDistance}
               setDuration={setDuration}
+              showActiveRide={!!activeRide} // Show online riders only when no active ride
             />
           </Box>
 
@@ -1461,6 +1462,7 @@ export default function Booking() {
             setRoute={setRoute}
             setDistance={setDistance}
             setDuration={setDuration}
+            showActiveRide={!!activeRide} // Show online riders only when no active ride
           />
         </Paper>
       </Box>

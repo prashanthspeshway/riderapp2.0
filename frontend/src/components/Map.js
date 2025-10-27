@@ -46,6 +46,7 @@ export default function Map({
   setDistance,
   setDuration,
   viewOnly = false,
+  showActiveRide = false, // New prop to control whether to show online riders
 }) {
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
@@ -320,8 +321,8 @@ export default function Map({
         />
       )}
 
-      {/* 🚗 Online Riders Markers with Vehicle Icons - Only show if pickup/drop not set */}
-      {onlineRiders && onlineRiders.length > 0 && !pickup && !drop && (
+      {/* 🚗 Online Riders Markers with Vehicle Icons - Show when no active ride */}
+      {onlineRiders && onlineRiders.length > 0 && !showActiveRide && (
         <>
           {onlineRiders.map((rider) => {
             console.log('📍 Rendering rider marker:', rider);
