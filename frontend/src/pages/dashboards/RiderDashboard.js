@@ -406,15 +406,55 @@ export default function RiderDashboard() {
     try {
       const response = await acceptRide(rideId);
       if (response.data?.success) {
-        showSuccess("Ride accepted! Please verify OTP to activate the ride.");
+        showSuccess("Ride accepted! Navigating to pickup location.");
         
         const acceptedRide = response.data.ride;
         if (acceptedRide) {
-          setSelectedRide(acceptedRide);
-          setOtpModalOpen(true);
-          
-          const roomId = `ride_${acceptedRide._id}`;
-          socket.emit('joinChatRoom', roomId);
+          // Fetch full ride details immediately after acceptance
+          try {
+            const rideDetailsResponse = await axios.get(
+              `http://localhost:5000/api/rides/${acceptedRide._id}`,
+              { headers: { Authorization: `Bearer ${auth?.token}` } }
+            );
+            
+            if (rideDetailsResponse.data.success && rideDetailsResponse.data.ride) {
+              const fullRideData = rideDetailsResponse.data.ride;
+              setSelectedRide(fullRideData);
+              
+              // Show user's pickup location on map
+              if (fullRideData.pickupCoords) {
+                setPickup({
+                  lat: fullRideData.pickupCoords.lat,
+                  lng: fullRideData.pickupCoords.lng
+                });
+                setPickupAddress(fullRideData.pickup || "");
+              }
+              
+              if (fullRideData.dropCoords) {
+                setDrop({
+                  lat: fullRideData.dropCoords.lat,
+                  lng: fullRideData.dropCoords.lng
+                });
+                setDropAddress(fullRideData.drop || "");
+              }
+              
+              // Join chat room for communication
+              const roomId = `ride_${acceptedRide._id}`;
+              socket.emit('joinChatRoom', roomId);
+              console.log("✅ Joined chat room:", roomId);
+            }
+          } catch (error) {
+            console.error("Error fetching ride details:", error);
+            // Use accepted ride data as fallback
+            setSelectedRide(acceptedRide);
+            if (acceptedRide.pickupCoords) {
+              setPickup({
+                lat: acceptedRide.pickupCoords.lat,
+                lng: acceptedRide.pickupCoords.lng
+              });
+              setPickupAddress(acceptedRide.pickup || "");
+            }
+          }
         }
         
         fetchPendingRides();
@@ -1132,6 +1172,81 @@ export default function RiderDashboard() {
                   }}
                 >
                   Accept Ride
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+        </Box>
+      )}
+
+      {/* User Info Container - Shows when ride is accepted */}
+      {selectedRide && selectedRide.riderId && (
+        <Box sx={{
+          position: 'fixed',
+          bottom: 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '90%',
+          maxWidth: 400,
+          zIndex: 1000
+        }}>
+          <Card sx={{ borderRadius: 3, boxShadow: 6 }}>
+            <CardContent sx={{ p: 2 }}>
+              {/* User Info */}
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <Avatar sx={{ width: 56, height: 56, bgcolor: 'primary.main', mr: 2 }}>
+                  {selectedRide.riderId?.fullName?.charAt(0) || 'U'}
+                </Avatar>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    {selectedRide.riderId?.fullName || 'User'}
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Star sx={{ color: 'warning.main', fontSize: 18 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      {selectedRide.riderId?.rating || '4.5'} ⭐
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              {/* Action Buttons */}
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<Phone />}
+                  onClick={handleCall}
+                  sx={{
+                    py: 1.5,
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    borderColor: '#22c55e',
+                    color: '#22c55e',
+                    '&:hover': {
+                      borderColor: '#16a34a',
+                      bgcolor: 'rgba(34, 197, 94, 0.05)'
+                    }
+                  }}
+                >
+                  Call
+                </Button>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  startIcon={<Chat />}
+                  onClick={handleChat}
+                  sx={{
+                    py: 1.5,
+                    fontWeight: 600,
+                    borderRadius: 2,
+                    backgroundColor: '#22c55e',
+                    '&:hover': {
+                      backgroundColor: '#16a34a'
+                    }
+                  }}
+                >
+                  Chat
                 </Button>
               </Box>
             </CardContent>
