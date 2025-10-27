@@ -801,17 +801,240 @@ export default function Booking() {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ mt: { xs: 1, md: 3 } }}>
-      <Box sx={{ 
-        display: "grid", 
-        gridTemplateColumns: { xs: "1fr", md: "1fr 2fr" }, 
-        gap: { xs: 1, md: 2 }
-      }}>
-        {/* Mobile-First Left panel */}
-        <Paper sx={{ 
-          p: { xs: 2, md: 3 }, 
-          borderRadius: { xs: 1, md: 2 }
-        }}>
+    <>
+      {/* Mobile: Full-screen map with bottom sheet */}
+      {isMobile ? (
+        <Box sx={{ position: 'relative', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+          {/* Full Screen Map */}
+          <Box 
+            sx={{ 
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: '100%',
+              width: '100%'
+            }}
+            onClick={() => {
+              // When map is tapped, collapse sheet and allow location input
+              setSheetExpanded(false);
+            }}
+          >
+            <MapComponent
+              apiKey={GOOGLE_API_KEY}
+              pickup={pickup}
+              setPickup={setPickup}
+              setPickupAddress={setPickupAddress}
+              drop={drop}
+              setDrop={setDrop}
+              setDropAddress={setDropAddress}
+              riderLocation={riderLocation}
+              driverLocation={activeRide?.captainId?.currentLocation}
+              route={route}
+              setRoute={setRoute}
+              setDistance={setDistance}
+              setDuration={setDuration}
+            />
+          </Box>
+
+          {/* Bottom Sheet - Uber-like */}
+          <Box
+            ref={bottomSheetRef}
+            sx={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: sheetExpanded ? '85vh' : '40vh',
+              backgroundColor: 'white',
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              transition: 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              overflow: 'hidden',
+              zIndex: 100
+            }}
+          >
+            {/* Drag Handle */}
+            <Box
+              sx={{
+                width: 40,
+                height: 4,
+                bgcolor: 'grey.400',
+                borderRadius: 2,
+                mx: 'auto',
+                mt: 1.5,
+                mb: 1,
+                cursor: 'pointer'
+              }}
+              onClick={() => setSheetExpanded(!sheetExpanded)}
+            />
+
+            {/* Content - Scrollable */}
+            <Box sx={{ overflowY: 'auto', flex: 1, px: 2 }}>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                Find a trip
+              </Typography>
+
+              {/* Pickup Input */}
+              <TextField
+                fullWidth
+                label="Pick-up location"
+                value={pickupAddress}
+                onChange={(e) => {
+                  setPickupAddress(e.target.value);
+                  fetchSuggestions(e.target.value, setPickupSuggestions, pickup);
+                }}
+                inputRef={pickupInputRef}
+                sx={{ mb: 1 }}
+              />
+              {pickupSuggestions.map((s, i) => (
+                <ListItemButton
+                  key={i}
+                  onClick={() => handlePickupSelect(s.place_id, s.description)}
+                >
+                  {s.description}
+                </ListItemButton>
+              ))}
+
+              {/* Drop Input */}
+              <TextField
+                fullWidth
+                label="Drop-off location"
+                value={dropAddress}
+                onChange={(e) => {
+                  setDropAddress(e.target.value);
+                  fetchSuggestions(e.target.value, setDropSuggestions, pickup);
+                }}
+                inputRef={dropInputRef}
+                sx={{ mb: 2 }}
+              />
+              {dropSuggestions.map((s, i) => (
+                <ListItemButton
+                  key={i}
+                  onClick={() => handleDropSelect(s.place_id, s.description)}
+                >
+                  {s.description}
+                </ListItemButton>
+              ))}
+
+              {/* Vehicle Options - When drop is selected */}
+              {drop && (
+                <>
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 2, mt: 3 }}>
+                    Choose a ride
+                  </Typography>
+                  
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pb: 2 }}>
+                    {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+                      const code = t.code || t.name?.toLowerCase() || "car";
+                      const icon = getIconForCode(code);
+                      const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
+                      const price = estimatePriceForCode(code, distance);
+                      const description = `${t.seats || 4} seats • ${t.ac ? 'AC' : 'Non-AC'}`;
+
+                      return (
+                        <Card
+                          key={`m-${code}`}
+                          onClick={() => setSelectedRide(code)}
+                          sx={{
+                            cursor: 'pointer',
+                            border: selectedRide === code ? '2px solid' : '1px solid',
+                            borderColor: selectedRide === code ? 'black' : 'grey.300',
+                            '&:hover': { borderColor: 'black' }
+                          }}
+                        >
+                          <CardContent sx={{ p: 1.5 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                                <Avatar 
+                                  src={getVehicleImage(code)} 
+                                  sx={{ 
+                                    mr: 1.5, 
+                                    width: 56, 
+                                    height: 56,
+                                    bgcolor: 'grey.100',
+                                    '& img': {
+                                      objectFit: 'contain',
+                                      padding: '10px'
+                                    }
+                                  }}
+                                >
+                                  {getVehicleIcon(code)}
+                                </Avatar>
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="subtitle2" sx={{ mb: 0.25 }}>
+                                    {t.name || 'Car'}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
+                                    {description}
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                                    <Chip 
+                                      icon={<AccessTime />} 
+                                      label={`${etaMin} min`} 
+                                      size="small" 
+                                      variant="outlined"
+                                    />
+                                  </Box>
+                                </Box>
+                              </Box>
+                              <Box sx={{ textAlign: 'right' }}>
+                                <Typography variant="subtitle2">
+                                  ₹{price}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </Box>
+
+                  {/* Request Button */}
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    disabled={!selectedRide || lookingForRider}
+                    sx={{ 
+                      bgcolor: selectedRide && !lookingForRider ? "black" : "grey.400", 
+                      "&:hover": { bgcolor: selectedRide && !lookingForRider ? "#333" : "grey.400" }, 
+                      mt: 2,
+                      mb: 2,
+                      py: 1.5,
+                      fontSize: '1rem',
+                      minHeight: 48
+                    }}
+                    onClick={handleFindRiders}
+                    startIcon={lookingForRider ? <CircularProgress size={20} color="inherit" /> : null}
+                  >
+                    {lookingForRider
+                      ? "Looking for drivers..."
+                      : selectedRide
+                        ? `Request ${displayNameForCode(selectedRide)}`
+                        : "Select Vehicle Type First"}
+                  </Button>
+                </>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      ) : (
+        /* Desktop Layout */
+        <Container maxWidth="xl" sx={{ mt: 3 }}>
+          <Box sx={{ 
+            display: "grid", 
+            gridTemplateColumns: "1fr 2fr", 
+            gap: 2
+          }}>
+            {/* Left panel - Desktop */}
+            <Paper sx={{ 
+              p: 3, 
+              borderRadius: 2
+            }}>
           <Typography variant={isMobile ? "body1" : "h6"} sx={{ 
             mb: { xs: 1.5, md: 2 },
             display: 'flex',
@@ -1241,8 +1464,9 @@ export default function Booking() {
           />
         </Paper>
       </Box>
-
-
+      </Container>
+      )}
+      
       {/* Simple Chat Modal */}
       <SimpleChatModal
         open={chatOpen}
@@ -1655,7 +1879,6 @@ export default function Booking() {
         onClose={() => setCancelOpen(false)}
         onConfirm={handleCancelRide}
       />
-
-    </Container>
+    </>
   );
 }

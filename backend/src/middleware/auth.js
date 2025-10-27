@@ -7,6 +7,12 @@ const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
+    // Allow the /online endpoint to be accessed without auth (for map display)
+    if (req.path === '/online' || req.originalUrl.includes('/online')) {
+      console.log('✅ Bypassing auth for /online endpoint');
+      return next();
+    }
+    
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       console.log("❌ No authorization header");
       return res

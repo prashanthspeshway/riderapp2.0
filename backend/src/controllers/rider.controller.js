@@ -681,6 +681,70 @@ const updateRiderLocation = async (req, res) => {
   }
 };
 
+// Get all online riders with their locations (for map display) - PUBLIC ENDPOINT
+const getOnlineRiders = async (req, res) => {
+  console.log('📍 GET /api/rider/online - Public endpoint (no auth)');
+  
+  try {
+    console.log('📍 Fetching online riders for map display');
+    
+    // Fetch from User collection (primary source)
+    let onlineRiders = await User.find({
+      role: 'rider',
+      isOnline: true,
+      'currentLocation.lat': { $exists: true },
+      'currentLocation.lng': { $exists: true }
+    }).select('_id fullName firstName lastName mobile vehicleType currentLocation rating').lean();
+    
+    console.log(`🚗 Found ${onlineRiders.length} online riders with locations in User collection`);
+    
+    // If no riders in User collection, try Rider collection
+    if (onlineRiders.length === 0) {
+      try {
+        onlineRiders = await Rider.find({
+          isOnline: true,
+          'currentLocation.lat': { $exists: true },
+          'currentLocation.lng': { $exists: true }
+        }).select('_id firstName lastName mobile vehicleType currentLocation status').lean();
+        
+        console.log(`🚗 Found ${onlineRiders.length} online riders with locations in Rider collection`);
+      } catch (err) {
+        console.error('❌ Error fetching from Rider collection:', err);
+      }
+    }
+    
+    // Format the response with vehicle type mapping
+    const riders = onlineRiders.map(rider => ({
+      id: rider._id.toString(),
+      name: rider.fullName || rider.firstName || 'Rider',
+      mobile: rider.mobile,
+      vehicleType: rider.vehicleType,
+      location: {
+        lat: rider.currentLocation.lat,
+        lng: rider.currentLocation.lng,
+        address: rider.currentLocation.address || ''
+      },
+      rating: rider.rating || 4.5
+    }));
+    
+    console.log(`✅ Returning ${riders.length} riders to frontend`);
+    
+    res.json({
+      success: true,
+      riders,
+      count: riders.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Get online riders error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch online riders',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   registerRider,
   getAllRiders,
@@ -692,5 +756,6 @@ module.exports = {
   updateRiderOnlineStatus,
   getRidersByVehicleType,
   getVehicleTypeStats,
-  updateRiderLocation
+  updateRiderLocation,
+  getOnlineRiders
 };

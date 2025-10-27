@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import axios from "axios";
 import {
   GoogleMap,
   Marker,
@@ -17,6 +18,21 @@ const DEFAULT_PICKUP = { lat: 17.385044, lng: 78.486671 };
 // Static libraries array to fix performance warning
 const LIBRARIES = ["places"];
 
+// Get vehicle icon URL for map markers
+const getVehicleIconUrl = (vehicleType) => {
+  const iconMap = {
+    'bike': 'https://cdn-icons-png.flaticon.com/512/2907/2907618.png', // Bike icon
+    'scooty': 'https://cdn-icons-png.flaticon.com/512/2907/2907557.png', // Scooter icon
+    'auto': 'https://cdn-icons-png.flaticon.com/512/1766/1766602.png', // Auto rickshaw icon
+    'car': 'https://cdn-icons-png.flaticon.com/512/2907/2907523.png', // Car icon
+    'car_ac': 'https://cdn-icons-png.flaticon.com/512/2907/2907523.png', // Car with AC icon
+    'car_6': 'https://cdn-icons-png.flaticon.com/512/2907/2907590.png', // SUV icon
+    'premium': 'https://cdn-icons-png.flaticon.com/512/2907/2907535.png', // Premium car icon
+    'parcel': 'https://cdn-icons-png.flaticon.com/512/2907/2907622.png' // Delivery truck icon
+  };
+  return iconMap[vehicleType] || iconMap['car']; // Default to car icon
+};
+
 export default function Map({
   apiKey,
   pickup,
@@ -33,12 +49,37 @@ export default function Map({
 }) {
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
+  const [onlineRiders, setOnlineRiders] = useState([]);
 
   // Debug logging
   console.log("🗺️ Map Component - Pickup:", pickup);
   console.log("🗺️ Map Component - Drop:", drop);
   console.log("🗺️ Map Component - Driver Location:", driverLocation);
   console.log("🗺️ Map Component - Rider Location:", riderLocation);
+
+  // 🚗 Fetch online riders for map display
+  useEffect(() => {
+    const fetchOnlineRiders = async () => {
+      try {
+        // Use full URL to hit backend on port 5000
+        const response = await axios.get('http://localhost:5000/api/rider/online');
+        console.log('📍 Fetched online riders response:', response.data);
+        if (response.data.success) {
+          console.log('📍 Online riders:', response.data.riders);
+          console.log('📍 Total riders to display:', response.data.riders.length);
+          setOnlineRiders(response.data.riders);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching online riders:', error);
+        console.error('❌ Error details:', error.response?.data || error.message);
+      }
+    };
+
+    fetchOnlineRiders();
+    // Refresh every 5 seconds for live updates
+    const interval = setInterval(fetchOnlineRiders, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -93,7 +134,7 @@ export default function Map({
       if (!directionsRendererRef.current) {
         directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
           suppressMarkers: true,
-          polylineOptions: { strokeColor: "blue", strokeWeight: 5 },
+          polylineOptions: { strokeColor: "#22c55e", strokeWeight: 3, strokeOpacity: 0.8 },
         });
       }
 
@@ -145,15 +186,27 @@ export default function Map({
       zoom={14}
       options={{
         disableDefaultUI: true,
-        zoomControl: true,
+        zoomControl: false,            // Hide +/- zoom buttons
         streetViewControl: false,
         fullscreenControl: false,
         gestureHandling: "greedy",
-            mapTypeControl: false,      // ❌ removes Map/Satellite toggle
-            rotateControl: false,       // ❌ removes rotate control (map compass)
-            scaleControl: true,         // ✅ adds scale bar
+        mapTypeControl: false,         // Removes Map/Satellite toggle
+        rotateControl: false,          // Removes rotate control
+        scaleControl: false,           // Hide scale bar
+        clickableIcons: false,         // Prevent info window from opening
       }}
-      onLoad={(map) => (mapRef.current = map)}
+      onLoad={(map) => {
+        mapRef.current = map;
+        
+        // Hide Google branding
+        const style = document.createElement('style');
+        style.innerHTML = `
+          .gm-style-cc { display: none !important; }
+          .gm-style a[title="Report problems with Street View imagery"] { display: none !important; }
+          .gm-style-iw { display: none !important; }
+        `;
+        document.head.appendChild(style);
+      }}
       onClick={viewOnly ? undefined : (e) => {
         const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
         setDrop(loc);
@@ -170,6 +223,7 @@ export default function Map({
             url: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
             scaledSize: new window.google.maps.Size(32, 32),
           }}
+          onClick={() => {}} // Prevent info window
           onDragEnd={viewOnly ? undefined : (e) => {
             const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
             setPickup(loc);
@@ -188,6 +242,7 @@ export default function Map({
             url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
             scaledSize: new window.google.maps.Size(32, 32),
           }}
+          onClick={() => {}} // Prevent info window
           onDragEnd={viewOnly ? undefined : (e) => {
             const loc = { lat: e.latLng.lat(), lng: e.latLng.lng() };
             setDrop(loc);
@@ -206,6 +261,32 @@ export default function Map({
             scaledSize: new window.google.maps.Size(40, 40),
           }}
         />
+      )}
+
+      {/* 🚗 Online Riders Markers with Vehicle Icons */}
+      {onlineRiders && onlineRiders.length > 0 && (
+        <>
+          {onlineRiders.map((rider) => {
+            console.log('📍 Rendering rider marker:', rider);
+            if (!rider.location || !rider.location.lat || !rider.location.lng) {
+              console.warn('⚠️ Rider missing location:', rider);
+              return null;
+            }
+            const vehicleIcon = getVehicleIconUrl(rider.vehicleType || 'car');
+            return (
+              <Marker
+                key={`online-rider-${rider.id}`}
+                position={{ lat: rider.location.lat, lng: rider.location.lng }}
+                icon={{
+                  url: vehicleIcon,
+                  scaledSize: new window.google.maps.Size(40, 40),
+                  anchor: new window.google.maps.Point(20, 20),
+                }}
+                title={`${rider.name} - ${rider.vehicleType || 'car'}`}
+              />
+            );
+          })}
+        </>
       )}
 
       {/* ✅ Driver Marker (Blue Car Icon) */}

@@ -11,11 +11,13 @@ const {
   updateRiderOnlineStatus,
   getRidersByVehicleType,
   getVehicleTypeStats,
-  updateRiderLocation
+  updateRiderLocation,
+  getOnlineRiders
 } = require('../controllers/rider.controller');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
-// Public routes
+// Public routes (no auth middleware)
+router.get('/online', getOnlineRiders); // Get all online riders with locations (public for map) - NO AUTH
 router.post('/register', uploadMultiple, registerRider);
 
 // Protected routes (require authentication)
