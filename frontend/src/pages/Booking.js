@@ -836,6 +836,7 @@ export default function Booking() {
               setDistance={setDistance}
               setDuration={setDuration}
               showActiveRide={!!activeRide} // Show online riders only when no active ride
+              filterVehicleType={selectedRide} // Filter online riders by selected type
             />
           </Box>
 
@@ -1463,6 +1464,7 @@ export default function Booking() {
             setDistance={setDistance}
             setDuration={setDuration}
             showActiveRide={!!activeRide} // Show online riders only when no active ride
+            filterVehicleType={selectedRide} // Filter online riders by selected type (desktop)
           />
         </Paper>
       </Box>

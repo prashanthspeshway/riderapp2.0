@@ -684,60 +684,166 @@ const updateRiderLocation = async (req, res) => {
 // Get all online riders with their locations (for map display) - PUBLIC ENDPOINT
 const getOnlineRiders = async (req, res) => {
   console.log('📍 GET /api/rider/online - Public endpoint (no auth)');
-  
+
   try {
-    console.log('📍 Fetching online riders for map display');
-    
-    // Fetch from User collection (primary source)
-    let onlineRiders = await User.find({
-      role: 'rider',
-      isOnline: true,
-      'currentLocation.lat': { $exists: true },
-      'currentLocation.lng': { $exists: true }
-    }).select('_id fullName firstName lastName mobile vehicleType currentLocation rating').lean();
-    
-    console.log(`🚗 Found ${onlineRiders.length} online riders with locations in User collection`);
-    
-    // If no riders in User collection, try Rider collection
-    if (onlineRiders.length === 0) {
+    // Normalize vehicle type to canonical codes
+    const normalizeType = (type) => {
+      if (!type) return 'car';
+      const t = String(type).toLowerCase().replace(/\s|-/g, '_');
+      switch (t) {
+        case 'bike':
+        case 'two_wheeler':
+        case 'twowheeler':
+        case 'scooter':
+        case 'scooty':
+          return 'bike';
+        case 'auto':
+        case 'autorickshaw':
+        case 'auto_rickshaw':
+        case 'auto_3':
+        case 'three_wheeler':
+        case 'threewheeler':
+        case 'three_wheeler_auto':
+        case 'e_rickshaw':
+        case 'erickshaw':
+        case 'rickshaw':
+        case 'tuk_tuk':
+          return 'auto';
+        case 'car':
+        case 'cab':
+        case 'car_4':
+        case 'car_ac':
+        case 'car_6':
+          return 'car';
+        case 'premium':
+        case 'vip':
+        case 'luxury':
+          return 'premium';
+        case 'parcel':
+        case 'delivery':
+        case 'cargo':
+          return 'parcel';
+        default:
+          return 'car';
+      }
+    };
+
+    // Robust location extraction (mirrors frontend)
+    const extractLatLng = (entity) => {
+      const l = entity?.currentLocation || entity?.location;
+      if (l && typeof l.lat === 'number' && typeof l.lng === 'number') {
+        return { lat: l.lat, lng: l.lng };
+      }
+      if (l && typeof l.latitude === 'number' && typeof l.longitude === 'number') {
+        return { lat: l.latitude, lng: l.longitude };
+      }
+      if (Array.isArray(l?.coordinates) && l.coordinates.length >= 2) {
+        const lat = Number(l.coordinates[1]);
+        const lng = Number(l.coordinates[0]);
+        if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+      }
+      const slat = l?.lat ?? l?.latitude;
+      const slng = l?.lng ?? l?.longitude;
+      if (slat != null && slng != null) {
+        const lat = parseFloat(slat);
+        const lng = parseFloat(slng);
+        if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+      }
+      return null;
+    };
+
+    const rawType = (req.query.type || req.query.vehicleType || '').toString().trim().toLowerCase();
+    const allowedTypes = new Set(['bike', 'auto', 'car']);
+    const typeFilter = allowedTypes.has(rawType) ? rawType : null;
+    console.log('🔎 Filters:', { type: typeFilter });
+
+    // Find all online riders first, regardless of location
+    const allOnline = await Rider.find({ isOnline: true })
+      .select('_id firstName lastName mobile vehicleType currentLocation isAvailable status')
+      .lean();
+
+    // Partition by location availability and normalize
+    const withLocation = [];
+    const withoutLocation = [];
+    allOnline.forEach(r => {
+      const loc = extractLatLng(r);
+      const vt = normalizeType(r.vehicleType);
+      const riderInfo = {
+        id: r._id.toString(),
+        name: `${r.firstName || ''} ${r.lastName || ''}`.trim() || 'Rider',
+        mobile: r.mobile,
+        vehicleType: vt,
+        location: loc ? { lat: loc.lat, lng: loc.lng, address: r.currentLocation?.address || '' } : null,
+        isAvailable: !!r.isAvailable
+      };
+      if (loc) withLocation.push(riderInfo); else withoutLocation.push(riderInfo);
+    });
+
+    // Apply type filter on the array level if requested
+    const filteredWithLocation = typeFilter ? withLocation.filter(r => r.vehicleType === typeFilter) : withLocation;
+    const filteredWithoutLocation = typeFilter ? withoutLocation.filter(r => r.vehicleType === typeFilter) : withoutLocation;
+
+    console.log(`🚗 Online riders total: ${allOnline.length}; with location: ${withLocation.length}; without location: ${withoutLocation.length}`);
+    if (filteredWithoutLocation.length > 0) {
+      const missingSummary = filteredWithoutLocation.map(r => `${r.name}:${r.vehicleType}`).join(', ');
+      console.log(`⚠️ Online without location${typeFilter ? ` (type=${typeFilter})` : ''}: [ ${missingSummary} ]`);
+    }
+
+    // Attempt to enrich riders without location using User.currentLocation or default city center
+    const DEFAULT_CITY = { lat: 17.385044, lng: 78.486671 }; // Hyderabad
+    let enrichedFallback = [];
+    if (filteredWithoutLocation.length > 0) {
       try {
-        onlineRiders = await Rider.find({
-          isOnline: true,
-          'currentLocation.lat': { $exists: true },
-          'currentLocation.lng': { $exists: true }
-        }).select('_id firstName lastName mobile vehicleType currentLocation status').lean();
-        
-        console.log(`🚗 Found ${onlineRiders.length} online riders with locations in Rider collection`);
-      } catch (err) {
-        console.error('❌ Error fetching from Rider collection:', err);
+        const ids = filteredWithoutLocation.map(r => r.id);
+        const users = await User.find({ _id: { $in: ids } }).select('_id currentLocation').lean();
+        const userLocMap = new Map(users.map(u => [u._id.toString(), u.currentLocation]));
+        enrichedFallback = filteredWithoutLocation.map(r => {
+          const uLoc = userLocMap.get(r.id);
+          const loc = (uLoc && typeof uLoc.lat === 'number' && typeof uLoc.lng === 'number')
+            ? { lat: uLoc.lat, lng: uLoc.lng, address: uLoc.address || '' }
+            : { lat: DEFAULT_CITY.lat, lng: DEFAULT_CITY.lng, address: 'Default city' };
+          return { ...r, location: loc, hasLocation: !!uLoc };
+        });
+      } catch (e) {
+        console.warn('⚠️ Fallback enrichment failed, using default city:', e.message);
+        enrichedFallback = filteredWithoutLocation.map(r => ({
+          ...r,
+          location: { lat: DEFAULT_CITY.lat, lng: DEFAULT_CITY.lng, address: 'Default city' },
+          hasLocation: false
+        }));
       }
     }
-    
-    // Format the response with vehicle type mapping
-    const riders = onlineRiders.map(rider => ({
-      id: rider._id.toString(),
-      name: rider.fullName || rider.firstName || 'Rider',
-      mobile: rider.mobile,
-      vehicleType: rider.vehicleType,
-      location: {
-        lat: rider.currentLocation.lat,
-        lng: rider.currentLocation.lng,
-        address: rider.currentLocation.address || ''
-      },
-      rating: rider.rating || 4.5
-    }));
-    
-    console.log(`✅ Returning ${riders.length} riders to frontend`);
-    
-    res.json({
-      success: true,
-      riders,
-      count: riders.length
+
+    const responseRiders = [...filteredWithLocation, ...enrichedFallback];
+    const summary = responseRiders.map(r => `${r.name}:${r.vehicleType}`).join(', ');
+    console.log(`✅ Returning ${responseRiders.length} riders to frontend${typeFilter ? ` (type=${typeFilter})` : ''} → [ ${summary} ]`);
+
+    // Log each rider with name, type, and icon separately for clearer diagnostics
+    const iconForType = (tRaw) => {
+      const t = String(tRaw || '').toLowerCase();
+      switch (t) {
+        case 'bike': return '🏍️';
+        case 'auto': return '🛺';
+        case 'car': return '🚗';
+        case 'premium': return '🚘';
+        case 'parcel': return '📦';
+        default: return '🚗';
+      }
+    };
+    responseRiders.forEach(r => {
+      const icon = iconForType(r.vehicleType);
+      console.log(`🧑 Name: ${r.name || 'Rider'} | 🚘 Type: ${r.vehicleType} | 🔣 Icon: ${icon}`);
     });
-    
+
+    return res.json({
+      success: true,
+      riders: responseRiders,
+      count: responseRiders.length
+    });
+
   } catch (error) {
     console.error('❌ Get online riders error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch online riders',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'

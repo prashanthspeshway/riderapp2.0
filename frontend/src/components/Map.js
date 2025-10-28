@@ -18,19 +18,94 @@ const DEFAULT_PICKUP = { lat: 17.385044, lng: 78.486671 };
 // Static libraries array to fix performance warning
 const LIBRARIES = ["places"];
 
-// Get vehicle icon URL for map markers
+// Normalize various vehicle type strings to canonical codes
+const normalizeType = (type) => {
+  if (!type) return 'car';
+  const t = String(type).toLowerCase().replace(/\s|-/g, '_');
+  switch (t) {
+    case 'bike':
+    case 'two_wheeler':
+    case 'twowheeler':
+    case 'scooter':
+    case 'scooty':
+      return 'bike';
+    case 'auto':
+    case 'autorickshaw':
+    case 'auto_rickshaw':
+    case 'auto_3':
+    case 'three_wheeler':
+    case 'threewheeler':
+    case 'three_wheeler_auto':
+    case 'e_rickshaw':
+    case 'erickshaw':
+    case 'rickshaw':
+    case 'tuk_tuk':
+      return 'auto';
+    case 'car':
+    case 'cab':
+    case 'car_4':
+    case 'car_ac':
+    case 'car_6':
+      return 'car';
+    case 'premium':
+    case 'vip':
+    case 'luxury':
+      return 'premium';
+    case 'parcel':
+    case 'delivery':
+    case 'cargo':
+      return 'parcel';
+    default:
+      return 'car';
+  }
+};
+
+// Get vehicle icon URL for map markers using Google default icons
 const getVehicleIconUrl = (vehicleType) => {
+  const code = normalizeType(vehicleType);
+  // Use Google Maps default dot icons for maximum reliability
   const iconMap = {
-    'bike': 'https://cdn-icons-png.flaticon.com/512/2907/2907618.png', // Bike icon
-    'scooty': 'https://cdn-icons-png.flaticon.com/512/2907/2907557.png', // Scooter icon
-    'auto': 'https://cdn-icons-png.flaticon.com/512/1766/1766602.png', // Auto rickshaw icon
-    'car': 'https://cdn-icons-png.flaticon.com/512/2907/2907523.png', // Car icon
-    'car_ac': 'https://cdn-icons-png.flaticon.com/512/2907/2907523.png', // Car with AC icon
-    'car_6': 'https://cdn-icons-png.flaticon.com/512/2907/2907590.png', // SUV icon
-    'premium': 'https://cdn-icons-png.flaticon.com/512/2907/2907535.png', // Premium car icon
-    'parcel': 'https://cdn-icons-png.flaticon.com/512/2907/2907622.png' // Delivery truck icon
+    bike: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png',
+    auto: 'http://maps.google.com/mapfiles/ms/icons/orange-dot.png',
+    car: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+    premium: 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png',
+    parcel: 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png'
   };
-  return iconMap[vehicleType] || iconMap['car']; // Default to car icon
+  return iconMap[code] || iconMap['car'];
+};
+
+// Safely extract latitude/longitude from various backend shapes
+const extractLatLng = (entity) => {
+  const l = entity?.location || entity?.currentLocation;
+  // Common shapes
+  if (l && typeof l.lat === 'number' && typeof l.lng === 'number') {
+    return { lat: l.lat, lng: l.lng };
+  }
+  if (l && typeof l.latitude === 'number' && typeof l.longitude === 'number') {
+    return { lat: l.latitude, lng: l.longitude };
+  }
+  // GeoJSON coordinates: [lng, lat]
+  if (Array.isArray(l?.coordinates) && l.coordinates.length >= 2) {
+    const lat = Number(l.coordinates[1]);
+    const lng = Number(l.coordinates[0]);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  // Top-level fields
+  if (typeof entity?.lat === 'number' && typeof entity?.lng === 'number') {
+    return { lat: entity.lat, lng: entity.lng };
+  }
+  if (typeof entity?.latitude === 'number' && typeof entity?.longitude === 'number') {
+    return { lat: entity.latitude, lng: entity.longitude };
+  }
+  // Strings fallback
+  const slat = l?.lat ?? l?.latitude ?? entity?.lat ?? entity?.latitude;
+  const slng = l?.lng ?? l?.longitude ?? entity?.lng ?? entity?.longitude;
+  if (slat != null && slng != null) {
+    const lat = parseFloat(slat);
+    const lng = parseFloat(slng);
+    if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+  }
+  return null;
 };
 
 export default function Map({
@@ -47,6 +122,7 @@ export default function Map({
   setDuration,
   viewOnly = false,
   showActiveRide = false, // New prop to control whether to show online riders
+  filterVehicleType = null, // Optional filter to show only selected vehicle type
 }) {
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
@@ -62,14 +138,24 @@ export default function Map({
   useEffect(() => {
     const fetchOnlineRiders = async () => {
       try {
-        // Use full URL to hit backend on port 5000
+        // Always fetch all riders; rely on client-side filtering for display
         const response = await axios.get('http://localhost:5000/api/rider/online');
-        console.log('📍 Fetched online riders response:', response.data);
-        if (response.data.success) {
-          console.log('📍 Online riders:', response.data.riders);
-          console.log('📍 Total riders to display:', response.data.riders.length);
-          setOnlineRiders(response.data.riders);
-        }
+        const data = response?.data || {};
+        console.log('📍 Fetched online riders response:', data);
+        const list = data.riders || data.drivers || data.captains || data.data || [];
+        const ridersRaw = Array.isArray(list) ? list : (list?.items || []);
+        // Normalize coordinates and types to ensure markers render
+        const riders = ridersRaw
+          .map((r) => {
+            const loc = extractLatLng(r);
+            const srcType = r.vehicleType ?? r.type ?? r.category ?? r.vehicle?.type;
+            const vtLocal = srcType ? normalizeType(srcType) : null;
+            const id = r.id || r._id || r.userId || r.riderId || r.driverId;
+            return { ...r, id, vehicleType: vtLocal, location: loc };
+          })
+          .filter((r) => r.location && typeof r.location.lat === 'number' && typeof r.location.lng === 'number' && !!r.vehicleType);
+        console.log('📍 Total riders to display (normalized):', riders.length);
+        setOnlineRiders(riders);
       } catch (error) {
         console.error('❌ Error fetching online riders:', error);
         console.error('❌ Error details:', error.response?.data || error.message);
@@ -77,10 +163,10 @@ export default function Map({
     };
 
     fetchOnlineRiders();
-    // Refresh every 5 seconds for live updates
+    // Refresh every 5 seconds for live updates (update when filter changes)
     const interval = setInterval(fetchOnlineRiders, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [filterVehicleType]);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -223,6 +309,26 @@ export default function Map({
     }
   }, [isLoaded, pickup, drop, setDistance, setDuration]);
 
+  // 🔭 Auto-fit map bounds to include pickup, drop, and online riders
+  useEffect(() => {
+    if (!isLoaded || !mapRef.current) return;
+    if (!onlineRiders || onlineRiders.length === 0) return;
+
+    try {
+      const bounds = new window.google.maps.LatLngBounds();
+      if (pickup && pickup.lat && pickup.lng) bounds.extend(new window.google.maps.LatLng(pickup.lat, pickup.lng));
+      if (drop && drop.lat && drop.lng) bounds.extend(new window.google.maps.LatLng(drop.lat, drop.lng));
+      onlineRiders.forEach(r => {
+        if (r.location && r.location.lat && r.location.lng) {
+          bounds.extend(new window.google.maps.LatLng(r.location.lat, r.location.lng));
+        }
+      });
+      mapRef.current.fitBounds(bounds);
+    } catch (e) {
+      console.warn('Map fitBounds failed:', e);
+    }
+  }, [isLoaded, onlineRiders, pickup, drop]);
+
   // ✅ Clear previous markers and create new ones
   useEffect(() => {
     if (mapRef.current) {
@@ -236,7 +342,15 @@ export default function Map({
 
   if (!isLoaded) return <p>Loading Map...</p>;
 
+  // Compute type counts for legend
+  const typeCounts = { bike: 0, auto: 0, car: 0, premium: 0, parcel: 0 };
+  onlineRiders.forEach(r => {
+    const code = normalizeType(r.vehicleType || 'car');
+    if (typeCounts[code] != null) typeCounts[code] += 1;
+  });
+
   return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
     <GoogleMap
       mapContainerStyle={containerStyle}
       center={pickup && pickup.lat && pickup.lng ? pickup : DEFAULT_PICKUP}
@@ -315,16 +429,17 @@ export default function Map({
           key={`rider-${riderLocation.lat.toFixed(5)}-${riderLocation.lng.toFixed(5)}`}
           position={riderLocation}
           icon={{
-            url: "https://cdn-icons-png.flaticon.com/512/64/64113.png",
-            scaledSize: new window.google.maps.Size(40, 40),
+            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+            scaledSize: new window.google.maps.Size(32, 32),
           }}
+          title="You"
         />
       )}
 
-      {/* 🚗 Online Riders Markers with Vehicle Icons - Show when no active ride */}
-      {onlineRiders && onlineRiders.length > 0 && !showActiveRide && (
+      {/* 🚗 Online Riders Markers with Vehicle Icons - Always show all types */}
+      {onlineRiders && onlineRiders.length > 0 && (
         <>
-          {onlineRiders.map((rider) => {
+          {onlineRiders.map((rider, idx) => {
             console.log('📍 Rendering rider marker:', rider);
             if (!rider.location || !rider.location.lat || !rider.location.lng) {
               console.warn('⚠️ Rider missing location:', rider);
@@ -333,13 +448,14 @@ export default function Map({
             const vehicleIcon = getVehicleIconUrl(rider.vehicleType || 'car');
             return (
               <Marker
-                key={`online-rider-${rider.id}`}
+                key={`online-rider-${rider.id || rider._id || rider.userId || idx}`}
                 position={{ lat: rider.location.lat, lng: rider.location.lng }}
                 icon={{
                   url: vehicleIcon,
                   scaledSize: new window.google.maps.Size(40, 40),
                   anchor: new window.google.maps.Point(20, 20),
                 }}
+                zIndex={1000}
                 title={`${rider.name} - ${rider.vehicleType || 'car'}`}
               />
             );
@@ -362,5 +478,30 @@ export default function Map({
       
       
     </GoogleMap>
+
+    {/* Overlay legend showing rider counts by type (exclude parcel) */}
+    <div style={{
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      background: 'rgba(255,255,255,0.9)',
+      color: '#111',
+      padding: '8px 10px',
+      borderRadius: 8,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      fontSize: 12,
+      lineHeight: 1.4,
+      pointerEvents: 'none'
+    }}>
+      <div><strong>Online riders:</strong> {onlineRiders.length}</div>
+      {(() => {
+        const labels = { bike: 'Bike', auto: 'Auto', car: 'Car', premium: 'Premium' };
+        const items = Object.entries(typeCounts)
+          .filter(([t, count]) => t !== 'parcel' && count > 0)
+          .map(([t, count]) => `${labels[t] || (t.charAt(0).toUpperCase() + t.slice(1))}: ${count}`);
+        return <div>{items.join(' • ') || '—'}</div>;
+      })()}
+    </div>
+    </div>
   );
 }
