@@ -1,3 +1,22 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Prevent horizontal scrolling on mobile */
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  height: 100%;
+}
+
+/* Ensure media elements don’t overflow the viewport */
+img, video, canvas, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Use border-box sizing to avoid unexpected element width growth */
+*, *::before, *::after {
+  box-sizing: border-box;
+}

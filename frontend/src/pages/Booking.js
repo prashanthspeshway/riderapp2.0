@@ -299,12 +299,9 @@ export default function Booking() {
         if (!isMounted) return;
         // Fall back to sensible defaults so booking stays usable
         setVehicleTypes([
-          { name: 'Scooty', code: 'scooty', seats: 1, ac: false, active: true },
           { name: 'Uber Bike', code: 'bike', seats: 1, ac: false, active: true },
           { name: 'Auto', code: 'auto', seats: 3, ac: false, active: true },
-          { name: 'Go Sedan (4 seats)', code: 'car_4', seats: 4, ac: false, active: true },
-          { name: 'Uber Go AC', code: 'car_ac', seats: 4, ac: true, active: true },
-          { name: 'XL (6 seats)', code: 'car_6', seats: 6, ac: false, active: true }
+          { name: 'Go Sedan (4 seats)', code: 'car_4', seats: 4, ac: false, active: true }
         ]);
         setTypesError("");
       } finally {
@@ -753,13 +750,10 @@ export default function Booking() {
   const getVehicleImage = (code) => {
     const imageMap = {
       'bike': '/images/vehicles/bike.png',
-      'scooty': '/images/vehicles/scooty.png',
       'auto': '/images/vehicles/auto.png',
       'auto_3': '/images/vehicles/auto.png',
       'car': '/images/vehicles/car.png',
       'car_4': '/images/vehicles/car.png',
-      'car_ac': '/images/vehicles/car-ac.png',
-      'car_6': '/images/vehicles/car-6seats.png',
       'premium': '/images/vehicles/premium.svg',
       'parcel': '/images/vehicles/parcel.png'
     };
@@ -804,7 +798,7 @@ export default function Booking() {
     <>
       {/* Mobile: Full-screen map with bottom sheet */}
       {isMobile ? (
-        <Box sx={{ position: 'relative', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+        <Box sx={{ position: 'relative', height: '100vh', width: '100%', overflow: 'hidden' }}>
           {/* Full Screen Map */}
           <Box 
             sx={{ 
@@ -930,8 +924,8 @@ export default function Booking() {
                     Choose a ride
                   </Typography>
                   
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pb: 2 }}>
-                    {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pb: 1 }}>
+                    {!typesLoading && !typesError && vehicleTypes.filter(t => t.active && !['scooty','car_ac','car_6'].includes((t.code || '').toLowerCase())).map((t) => {
                       const code = t.code || t.name?.toLowerCase() || "car";
                       const icon = getIconForCode(code);
                       const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
@@ -946,46 +940,38 @@ export default function Booking() {
                             cursor: 'pointer',
                             border: selectedRide === code ? '2px solid' : '1px solid',
                             borderColor: selectedRide === code ? 'black' : 'grey.300',
-                            '&:hover': { borderColor: 'black' }
+                            '&:hover': { borderColor: 'black' },
+                            minHeight: 56
                           }}
                         >
-                          <CardContent sx={{ p: 1.5 }}>
+                          <CardContent sx={{ p: 1 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                               <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
                                 <Avatar 
                                   src={getVehicleImage(code)} 
                                   sx={{ 
-                                    mr: 1.5, 
-                                    width: 56, 
-                                    height: 56,
+                                    mr: 1, 
+                                    width: 40, 
+                                    height: 40,
                                     bgcolor: 'grey.100',
                                     '& img': {
-                                      objectFit: 'contain',
-                                      padding: '10px'
+                                      objectFit: 'contain'
                                     }
                                   }}
                                 >
                                   {getVehicleIcon(code)}
                                 </Avatar>
                                 <Box sx={{ flex: 1 }}>
-                                  <Typography variant="subtitle2" sx={{ mb: 0.25 }}>
+                                  <Typography variant="body2" sx={{ mb: 0.25 }}>
                                     {t.name || 'Car'}
                                   </Typography>
-                                  <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-                                    {description}
+                                  <Typography variant="caption" color="text.secondary">
+                                    {(t.seats || 4)} seats • {etaMin} min
                                   </Typography>
-                                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                                    <Chip 
-                                      icon={<AccessTime />} 
-                                      label={`${etaMin} min`} 
-                                      size="small" 
-                                      variant="outlined"
-                                    />
-                                  </Box>
                                 </Box>
                               </Box>
                               <Box sx={{ textAlign: 'right' }}>
-                                <Typography variant="subtitle2">
+                                <Typography variant="body2">
                                   ₹{price}
                                 </Typography>
                               </Box>
@@ -1156,7 +1142,7 @@ export default function Booking() {
                   <Alert severity="error">{typesError}</Alert>
                 )}
 
-                {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+                {!typesLoading && !typesError && vehicleTypes.filter(t => t.active && !['scooty','car_ac','car_6'].includes((t.code || '').toLowerCase())).map((t) => {
                   const code = t.code || t.name?.toLowerCase() || "car";
                   const color = getColorForCode(code);
                   const icon = getIconForCode(code);
@@ -1524,7 +1510,7 @@ export default function Booking() {
             bottom: 0,
             left: 0,
             right: 0,
-            height: sheetExpanded ? '85vh' : '40vh',
+            height: '42vh',
             backgroundColor: 'white',
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
@@ -1557,7 +1543,7 @@ export default function Booking() {
                 transform: 'scale(0.9)'
               }
             }}
-            onClick={() => setSheetExpanded(!sheetExpanded)}
+            onClick={() => { /* fixed container; no expand */ }}
           />
         
         <Box ref={scrollableContentRef} sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
@@ -1586,7 +1572,7 @@ export default function Booking() {
               <Alert severity="error" sx={{ mx: 1 }}>{typesError}</Alert>
             )}
 
-            {!typesLoading && !typesError && vehicleTypes.filter(t => t.active).map((t) => {
+            {!typesLoading && !typesError && vehicleTypes.filter(t => t.active && !['scooty','car_ac','car_6'].includes((t.code || '').toLowerCase())).map((t) => {
               const code = t.code || t.name?.toLowerCase() || "car";
               const icon = getIconForCode(code);
               const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
@@ -1604,47 +1590,36 @@ export default function Booking() {
                     '&:hover': { borderColor: 'primary.main' }
                   }}
                 >
-                  <CardContent sx={{ p: 1.5 }}>
+                  <CardContent sx={{ p: 1 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
                           <Avatar 
                             src={getVehicleImage(code)} 
                             sx={{ 
-                              mr: 1.5, 
-                              width: 56, 
-                              height: 56,
+                              mr: 1, 
+                              width: 40, 
+                              height: 40,
                               bgcolor: 'grey.100',
                               '& img': {
                                 objectFit: 'contain',
-                                padding: '10px'
+                                padding: '6px'
                               }
                             }}
                           >
                             {getVehicleIcon(code)}
                           </Avatar>
                         <Box sx={{ flex: 1 }}>
-                          <Typography variant="subtitle2" sx={{ mb: 0.25 }}>
+                          <Typography variant="body2" sx={{ mb: 0.25 }}>
                             {t.name || 'Car'}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-                            {description}
+                          <Typography variant="caption" color="text.secondary">
+                            {description} • {etaMin} min
                           </Typography>
-                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                            <Chip 
-                              icon={<AccessTime />} 
-                              label={`${etaMin} min`} 
-                              size="small" 
-                              variant="outlined"
-                            />
-                          </Box>
                         </Box>
                       </Box>
                       <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="subtitle2">
+                        <Typography variant="body2">
                           {price}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          estimated
                         </Typography>
                       </Box>
                     </Box>
@@ -1670,12 +1645,12 @@ export default function Booking() {
                         src={getVehicleImage('parcel')} 
                         sx={{ 
                           mr: 1, 
-                          width: 48, 
-                          height: 48,
+                          width: 40, 
+                          height: 40,
                           bgcolor: 'grey.100',
                           '& img': {
                             objectFit: 'contain',
-                            padding: '8px'
+                            padding: '6px'
                           }
                         }}
                       >
@@ -1685,16 +1660,13 @@ export default function Booking() {
                         <Typography variant="body2" sx={{ mb: 0.25 }}>
                           Parcel
                         </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ mb: 0.25 }}>
-                          Send packages and documents
+                        <Typography variant="caption" color="text.secondary">
+                          Send packages and documents • 3 min
                         </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                          <Chip icon={<AccessTime />} label="3 min" size="small" variant="outlined" />
-                        </Box>
                       </Box>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>
+                      <Typography variant="body2" sx={{ color: 'text.primary' }}>
                         View
                       </Typography>
                     </Box>
@@ -1704,29 +1676,7 @@ export default function Booking() {
             )}
           </Box>
 
-          {/* Payment method - Cash (for future use) */}
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Payment</Typography>
-            <Card sx={{ border: '1px solid', borderColor: 'grey.300' }}>
-              <CardContent sx={{ p: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Avatar 
-                      src="/images/vehicles/cash.svg" 
-                      sx={{ width: 32, height: 32 }}
-                    >
-                      <AttachMoney />
-                    </Avatar>
-                    <Box>
-                      <Typography variant="body2">Cash</Typography>
-                      <Typography variant="caption" color="text.secondary">Pay with cash</Typography>
-                    </Box>
-                  </Box>
-                  <Chip label="Default" size="small" variant="outlined" />
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
+          {/* Payment method removed per design */}
 
           {/* Request button */}
           <Button

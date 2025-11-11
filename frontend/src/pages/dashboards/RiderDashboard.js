@@ -590,7 +590,7 @@ export default function RiderDashboard() {
   return (
     <Box sx={{ 
       height: '100vh',
-      width: '100vw',
+      width: '100%',
       position: 'fixed',
       top: 0,
       left: 0,

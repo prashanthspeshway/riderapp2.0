@@ -261,11 +261,8 @@ mongoose
         if (count === 0) {
           await VehicleType.insertMany([
             { name: 'Bike', code: 'bike', seats: 1, ac: false },
-            { name: 'Scooty', code: 'scooty', seats: 1, ac: false },
             { name: 'Auto (3 seats)', code: 'auto_3', seats: 3, ac: false },
             { name: 'Car (4 seats)', code: 'car_4', seats: 4, ac: false },
-            { name: 'Car with AC', code: 'car_ac', seats: 4, ac: true },
-            { name: 'Car (6 seats)', code: 'car_6', seats: 6, ac: false },
           ]);
           console.log('🚗 Seeded default VehicleType entries');
         } else {

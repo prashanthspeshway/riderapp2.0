@@ -80,10 +80,7 @@ export default function AdminDashboard() {
   const getVehicleImage = (vehicleType) => {
     const lower = vehicleType.toLowerCase();
     if (lower.includes('bike')) return '/images/vehicles/bike.png';
-    if (lower.includes('scooty')) return '/images/vehicles/scooty.png';
     if (lower.includes('auto')) return '/images/vehicles/auto.png';
-    if (lower.includes('car_ac') || lower.includes('car with ac')) return '/images/vehicles/car-ac.png';
-    if (lower.includes('car_6') || lower.includes('6 seats')) return '/images/vehicles/car-6seats.png';
     if (lower.includes('car')) return '/images/vehicles/car.png';
     return '/images/vehicles/car.png'; // default
   };

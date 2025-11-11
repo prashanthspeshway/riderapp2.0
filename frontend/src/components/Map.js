@@ -27,7 +27,6 @@ const normalizeType = (type) => {
     case 'two_wheeler':
     case 'twowheeler':
     case 'scooter':
-    case 'scooty':
       return 'bike';
     case 'auto':
     case 'autorickshaw':
@@ -44,8 +43,6 @@ const normalizeType = (type) => {
     case 'car':
     case 'cab':
     case 'car_4':
-    case 'car_ac':
-    case 'car_6':
       return 'car';
     case 'premium':
     case 'vip':
@@ -127,6 +124,7 @@ export default function Map({
   const mapRef = useRef(null);
   const directionsRendererRef = useRef(null);
   const [onlineRiders, setOnlineRiders] = useState([]);
+  const hasAutoZoomedRef = useRef(false); // ensure auto-zoom runs only once per page load
 
   // Debug logging
   console.log("🗺️ Map Component - Pickup:", pickup);
@@ -313,6 +311,7 @@ export default function Map({
   useEffect(() => {
     if (!isLoaded || !mapRef.current) return;
     if (!onlineRiders || onlineRiders.length === 0) return;
+    if (hasAutoZoomedRef.current) return; // already auto-zoomed once
 
     try {
       const bounds = new window.google.maps.LatLngBounds();
@@ -324,6 +323,7 @@ export default function Map({
         }
       });
       mapRef.current.fitBounds(bounds);
+      hasAutoZoomedRef.current = true; // mark as done
     } catch (e) {
       console.warn('Map fitBounds failed:', e);
     }

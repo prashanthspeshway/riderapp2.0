@@ -695,7 +695,6 @@ const getOnlineRiders = async (req, res) => {
         case 'two_wheeler':
         case 'twowheeler':
         case 'scooter':
-        case 'scooty':
           return 'bike';
         case 'auto':
         case 'autorickshaw':
@@ -712,8 +711,6 @@ const getOnlineRiders = async (req, res) => {
         case 'car':
         case 'cab':
         case 'car_4':
-        case 'car_ac':
-        case 'car_6':
           return 'car';
         case 'premium':
         case 'vip':

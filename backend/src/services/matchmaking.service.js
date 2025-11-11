@@ -30,11 +30,11 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
  */
 function getCompatibleVehicleTypes(rideType) {
   const mapping = {
-    'bike': ['bike', 'scooty'],
+    'bike': ['bike'],
     'auto': ['auto', 'auto_3'],
-    'car': ['car', 'car_4', 'car_6', 'car_ac'],
+    'car': ['car', 'car_4'],
     'premium': ['premium', 'premium_ac'],
-    'parcel': ['bike', 'auto', 'car', 'scooty'] // Parcels can use any vehicle
+    'parcel': ['bike', 'auto', 'car'] // Parcels use permitted vehicles
   };
   
   return mapping[rideType] || ['car']; // Default to car
