@@ -21,6 +21,7 @@ import {
   Person
 } from '@mui/icons-material';
 import io from 'socket.io-client';
+import { API_BASE } from '../services/api';
 
 // Notification sound function
 const playNotificationSound = () => {
@@ -65,7 +66,7 @@ const SimpleChatModal = ({ open, onClose, ride, userRole, socket, auth }) => {
           setLoading(true);
           console.log('💬 Loading messages for ride:', ride._id);
           
-          const response = await fetch(`http://localhost:5000/api/chat/messages/${ride._id}`, {
+          const response = await fetch(`${API_BASE}/api/chat/messages/${ride._id}`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json',

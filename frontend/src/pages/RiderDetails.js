@@ -3,8 +3,9 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Box, Typography, Paper, CircularProgress, Alert, Button, Grid } from "@mui/material";
 import axios from "axios";
+import { API_BASE } from "../services/api";
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
+const API = API_BASE;
 
 const RiderDetails = () => {
   const { id } = useParams();

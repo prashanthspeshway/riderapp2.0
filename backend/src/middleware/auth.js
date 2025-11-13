@@ -30,14 +30,11 @@ const authenticateToken = async (req, res, next) => {
 
     // Use a consistent secret key
     const jwtSecret = process.env.JWT_SECRET || "rider_app_secret_key_2024";
-    console.log("🔐 Using JWT secret:", jwtSecret ? "Set" : "Not set");
     
     const decoded = jwt.verify(token, jwtSecret);
-    console.log("🔐 Decoded token:", { id: decoded.id, role: decoded.role });
 
     // Handle admin users (they don't exist in User collection)
     if (decoded.role === 'admin' && decoded.id === 'admin-001') {
-      console.log("✅ Admin authenticated:", decoded.username, "Role:", decoded.role);
       req.user = {
         id: decoded.id,
         _id: decoded.id,
@@ -51,26 +48,32 @@ const authenticateToken = async (req, res, next) => {
       };
       return next();
     }
-    // If token role is 'rider', authenticate against new Riders collection
+    // If token role is 'rider', authenticate against new Riders collection OR User collection
     if (decoded.role === 'rider') {
-      const rider = await Rider.findById(decoded.id).lean();
+      // Try Rider collection first (new riders)
+      let rider = await Rider.findById(decoded.id).lean();
+      let isOldRider = false;
+      
       if (!rider) {
-        console.log("❌ Rider not found for ID:", decoded.id);
+        // If not found in Rider collection, try User collection (old riders)
+        rider = await User.findOne({ _id: decoded.id, role: "rider" }).lean();
+        isOldRider = true;
+      }
+      
+      if (!rider) {
         return res
           .status(401)
           .json({ success: false, message: "User not found" });
       }
 
-      console.log("✅ Rider authenticated:", `${rider.firstName} ${rider.lastName}`);
-
       req.user = {
         id: rider._id,
         _id: rider._id,
-        fullName: `${rider.firstName} ${rider.lastName}`,
+        fullName: isOldRider ? rider.fullName : `${rider.firstName} ${rider.lastName}`,
         mobile: rider.mobile,
         email: rider.email,
         role: 'rider',
-        approvalStatus: rider.status,
+        approvalStatus: isOldRider ? rider.approvalStatus : rider.status,
         isAvailable: rider.isAvailable || false,
         isOnline: rider.isOnline || false,
       };
@@ -80,13 +83,10 @@ const authenticateToken = async (req, res, next) => {
     // Otherwise authenticate classic users collection
     const user = await User.findById(decoded.id).lean();
     if (!user) {
-      console.log("❌ User not found for ID:", decoded.id);
       return res
         .status(401)
         .json({ success: false, message: "User not found" });
     }
-
-    console.log("✅ User authenticated:", user.fullName, "Role:", user.role);
 
     req.user = {
       id: user._id,

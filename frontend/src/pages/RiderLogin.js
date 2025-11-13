@@ -21,16 +21,18 @@ export default function RiderLogin() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const isValidMobile = (num) => /^[0-9]{10}$/.test(num);
+  const sanitizeMobile = (num) => (num || "").replace(/\D/g, "").slice(0, 10);
 
   const handleSendOtp = async () => {
     setMessage({ type: "", text: "" });
-    if (!mobile || !isValidMobile(mobile)) {
+    const cleaned = sanitizeMobile(mobile);
+    if (!cleaned || !isValidMobile(cleaned)) {
       setMessage({ type: "error", text: "Enter a valid 10-digit mobile number" });
       return;
     }
     try {
       setLoading(true);
-      const res = await sendOtp(mobile, "rider");
+      const res = await sendOtp(cleaned, "rider");
       if (res.data.success) {
         setStep(2);
         setMessage({ type: "success", text: "OTP sent! Check your mobile." });
@@ -48,13 +50,14 @@ export default function RiderLogin() {
 
   const handleVerifyOtp = async () => {
     setMessage({ type: "", text: "" });
-    if (!otp || otp.length < 4) {
-      setMessage({ type: "error", text: "Enter OTP" });
+    const cleanedMobile = sanitizeMobile(mobile);
+    if (!otp || otp.length !== 6) {
+      setMessage({ type: "error", text: "Enter a valid 6-digit OTP" });
       return;
     }
     try {
       setLoading(true);
-      const res = await verifyOtp(mobile, otp, "rider");
+      const res = await verifyOtp(cleanedMobile, otp, "rider");
       if (res.data.success) {
         const user = res.data.user;
         if (user.role !== "rider") {
@@ -62,13 +65,40 @@ export default function RiderLogin() {
           setLoading(false);
           return;
         }
+        
+        const token = res.data.token;
+        if (!token) {
+          setMessage({ type: "error", text: "No token received from server" });
+          setLoading(false);
+          return;
+        }
+        
         console.log("🔐 Rider Login - User role:", user.role);
+        console.log("🔐 Rider Login - Token received:", token ? `${token.substring(0, 20)}...` : 'MISSING');
+        console.log("🔐 Rider Login - User ID:", user._id);
         console.log("🔐 Rider Login - Setting roles:", [user.role]);
+        
+        // Save auth data
         login({
-          token: res.data.token,
+          token: token,
           user,
-          roles: [user.role], // ✅ FIX
+          roles: [user.role],
         });
+        
+        // Verify it was saved
+        const savedAuth = localStorage.getItem("auth");
+        if (savedAuth) {
+          const parsed = JSON.parse(savedAuth);
+          console.log("✅ Auth saved successfully:", {
+            hasToken: !!parsed.token,
+            tokenLength: parsed.token?.length,
+            userId: parsed.user?._id,
+            role: parsed.user?.role
+          });
+        } else {
+          console.error("❌ Failed to save auth data!");
+        }
+        
         setMessage({ type: "success", text: "Login successful! Redirecting..." });
         setTimeout(() => navigate("/rider-dashboard"), 1000);
       } else {

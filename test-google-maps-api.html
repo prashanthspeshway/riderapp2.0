@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Google Maps API Key</title>
+</head>
+<body>
+    <h1>Google Maps API Test</h1>
+    <p>Open browser console (F12) to see results</p>
+    <div id="result"></div>
+    
+    <script>
+        const API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo";
+        const currentDomain = window.location.hostname;
+        
+        console.log("🔍 Testing Google Maps API Key");
+        console.log("  - API Key:", API_KEY.substring(0, 10) + "...");
+        console.log("  - Current Domain:", currentDomain);
+        console.log("  - Full URL:", window.location.href);
+        
+        // Test 1: Try to load the Maps JavaScript API
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&callback=initMap`;
+        script.async = true;
+        script.defer = true;
+        
+        window.initMap = function() {
+            console.log("✅ Google Maps API loaded successfully!");
+            document.getElementById('result').innerHTML = '<p style="color: green;">✅ API Key is working!</p>';
+        };
+        
+        window.gm_authFailure = function() {
+            console.error("❌ Google Maps API authentication failed!");
+            console.error("  - The API key is restricted and does not allow this domain:", currentDomain);
+            document.getElementById('result').innerHTML = 
+                '<p style="color: red;">❌ API Key authentication failed!</p>' +
+                '<p>Your API key needs to allow this domain: ' + currentDomain + '</p>' +
+                '<p><a href="https://console.cloud.google.com/apis/credentials" target="_blank">Fix in Google Cloud Console</a></p>';
+        };
+        
+        script.onerror = function() {
+            console.error("❌ Failed to load Google Maps script");
+            document.getElementById('result').innerHTML = '<p style="color: red;">❌ Failed to load script</p>';
+        };
+        
+        document.head.appendChild(script);
+        
+        // Test 2: Try Geocoding API
+        setTimeout(() => {
+            fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=Hyderabad&key=${API_KEY}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'OK') {
+                        console.log("✅ Geocoding API is working!");
+                    } else {
+                        console.error("❌ Geocoding API error:", data.status, data.error_message);
+                    }
+                })
+                .catch(err => {
+                    console.error("❌ Geocoding API request failed:", err);
+                });
+        }, 2000);
+    </script>
+</body>
+</html>
+
+
+

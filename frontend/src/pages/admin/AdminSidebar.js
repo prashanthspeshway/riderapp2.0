@@ -7,8 +7,9 @@ import PendingActionsIcon from "@mui/icons-material/PendingActions";
 import LocalTaxiIcon from "@mui/icons-material/LocalTaxi";
 import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
+import { API_BASE } from "../../services/api";
 
-const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
+const API = API_BASE;
 
 export default function AdminSidebar() {
   const navigate = useNavigate();

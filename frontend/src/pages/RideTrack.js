@@ -23,12 +23,27 @@ export default function RideTrack() {
   });
 
   useEffect(() => {
-    // Rider GPS
-    navigator.geolocation.watchPosition((pos) => {
-      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      setRiderPos(coords);
-      socket.emit("riderLocation", { rideId: id, coords });
-    });
+    // Rider GPS - Use watchPosition for continuous tracking
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        console.log("📍 RideTrack GPS Update:", {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          source: pos.coords.accuracy < 100 ? "GPS" : "Network"
+        });
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setRiderPos(coords);
+        socket.emit("riderLocation", { rideId: id, coords });
+      },
+      (err) => {
+        console.error("GPS tracking error:", err);
+      },
+      { 
+        enableHighAccuracy: true,  // Force GPS on mobile
+        maximumAge: 0              // Force fresh GPS reading
+      }
+    );
 
     // Listen for driver updates
     socket.on("driverLocationUpdate", ({ rideId, coords }) => {
@@ -38,6 +53,7 @@ export default function RideTrack() {
     });
 
     return () => {
+      navigator.geolocation.clearWatch(watchId);
       socket.off("driverLocationUpdate");
     };
   }, [id]);

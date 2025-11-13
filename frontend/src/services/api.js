@@ -3,15 +3,45 @@ import axios from "axios";
 // Resolve API base dynamically to avoid hardcoded environments
 function resolveApiBase() {
   const envBase = process.env.REACT_APP_API_BASE || process.env.REACT_APP_BACKEND_URL;
-  if (envBase) return envBase;
+
+  // If accessing via localhost, always use localhost backend
   if (typeof window !== 'undefined') {
-    const { hostname } = window.location;
-    return `http://${hostname}:5000`;
+    const { protocol, hostname } = window.location;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    
+    if (isLocalhost) {
+      console.log("📍 Using localhost API (http://localhost:5000)");
+      return "http://localhost:5000";
+    }
+
+    const isNgrokHost = /ngrok\-free\.app$/.test(hostname);
+
+    // When accessing via ngrok, ALWAYS use relative paths so the proxy handles it
+    // This avoids CORS issues and ensures requests go through the dev server proxy
+    if (protocol === 'https:' && isNgrokHost) {
+      console.log("📍 Detected ngrok frontend, using proxy (relative paths)");
+      return '';
+    }
+
+    // For local network access (192.168.x.x), use the same hostname with port 5000
+    if (!envBase && /^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./.test(hostname)) {
+      const apiUrl = `http://${hostname}:5000`;
+      console.log("📍 Using local network API:", apiUrl);
+      return apiUrl;
+    }
   }
+
+  if (envBase) {
+    console.log("📍 Using environment API base:", envBase);
+    return envBase;
+  }
+
+  console.log("📍 Using default localhost API");
   return "http://localhost:5000";
 }
 
 const API_BASE = resolveApiBase();
+export { API_BASE };
 
 const AUTH_API = axios.create({
   baseURL: `${API_BASE}/api/auth`,
@@ -44,10 +74,21 @@ const getToken = () => {
     const authRaw = localStorage.getItem("auth");
     if (authRaw) {
       const parsed = JSON.parse(authRaw);
-      if (parsed && parsed.token) return parsed.token;
+      if (parsed && parsed.token) {
+        return parsed.token;
+      }
     }
-  } catch (e) {}
-  return localStorage.getItem("token") || null;
+  } catch (e) {
+    console.error("❌ getToken - Error parsing auth:", e);
+  }
+  
+  // Fallback to legacy token key
+  const legacyToken = localStorage.getItem("token");
+  if (legacyToken) {
+    return legacyToken;
+  }
+  
+  return null;
 };
 
 const attachToken = (config) => {
@@ -58,18 +99,46 @@ const attachToken = (config) => {
   const isOtpApi = base.includes("/api/otp");
   const shouldSkip = isAdminLogin || isOtpApi;
   if (shouldSkip) return config;
+  
   const token = getToken();
-  if (token) {
+  const isPublicEndpoint = base.includes("/api/otp") || base.includes("/api/auth");
+  
+  // CRITICAL: Block protected endpoint requests if no token
+  if (!token || typeof token !== 'string' || token.length < 10) {
+    if (!isPublicEndpoint) {
+      console.error('❌ BLOCKING request - No valid token:', base + url);
+      // Mark request as cancelled by adding a flag
+      config._cancelRequest = true;
+      config._cancelReason = 'No authentication token available';
+      // Return config but the request will be handled in error handler
+    }
+  } else {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 };
 
-RIDER_API.interceptors.request.use(attachToken);
-RIDES_API.interceptors.request.use(attachToken);
-ADMIN_API.interceptors.request.use(attachToken);
-RIDERS_API.interceptors.request.use(attachToken);
+// Request interceptor with cancellation check
+const requestInterceptor = (config) => {
+  const result = attachToken(config);
+  // If request was marked for cancellation, reject it
+  if (result._cancelRequest) {
+    const error = new Error(result._cancelReason || 'Request cancelled');
+    error.isCancel = true;
+    return Promise.reject(error);
+  }
+  return result;
+};
+
+RIDER_API.interceptors.request.use(requestInterceptor);
+RIDES_API.interceptors.request.use(requestInterceptor);
+ADMIN_API.interceptors.request.use(requestInterceptor);
+RIDERS_API.interceptors.request.use(requestInterceptor);
+
+// Track failed auth attempts to prevent infinite logout loops
+let consecutiveAuthFailures = 0;
+const MAX_AUTH_FAILURES = 3; // Increased to 3 to be less aggressive
 
 // Response interceptor for error handling
 const handleResponseError = (error) => {
@@ -80,12 +149,76 @@ const handleResponseError = (error) => {
   const isAuthFlow = base.includes("/api/otp") || base.includes("/api/auth") || (base.includes("/api/admin") && url.startsWith("/login"));
   const isOnLoginPage = ["/login", "/rider-login", "/admin"].includes(currentPath);
 
-  if (status === 401 && !isAuthFlow && !isOnLoginPage) {
-    // Token expired or invalid on protected routes: clear and redirect
-    localStorage.removeItem('auth');
-    localStorage.removeItem('token');
-    window.location.href = '/login';
+  // Log error details for debugging
+  console.error('❌ API Error:', {
+    status,
+    url: base + url,
+    message: error.message,
+    response: error.response?.data,
+    isNetworkError: !error.response
+  });
+
+  // Handle network errors (no response) - don't treat as auth error
+  if (!error.response) {
+    console.error('❌ Network error - API not reachable:', error.message);
+    console.error('  - API Base URL:', API_BASE);
+    console.error('  - Full URL:', base + url);
+    consecutiveAuthFailures = 0; // Reset on network errors
+    // Don't redirect on network errors, just reject
+    return Promise.reject(error);
   }
+
+  // Handle 401 errors more carefully
+  if (status === 401 && !isAuthFlow && !isOnLoginPage) {
+    const currentToken = getToken();
+    
+    // If there's no token at all, don't treat as auth failure - just a missing token
+    if (!currentToken) {
+      console.warn('⚠️ 401 but no token found - likely not logged in yet');
+      consecutiveAuthFailures = 0; // Reset counter
+      return Promise.reject(error);
+    }
+    
+    consecutiveAuthFailures++;
+    console.error(`❌ 401 Unauthorized (attempt ${consecutiveAuthFailures}/${MAX_AUTH_FAILURES})`);
+    console.error('  - Error message:', error.response?.data?.message);
+    console.error('  - Current token:', currentToken ? 'Present' : 'Missing');
+    console.error('  - Token preview:', currentToken ? currentToken.substring(0, 20) + '...' : 'N/A');
+    
+    // Check if it's a token expiration or invalid token
+    const errorMessage = error.response?.data?.message || '';
+    const isTokenExpired = errorMessage.includes('expired') || errorMessage.includes('Token expired');
+    const isInvalidToken = errorMessage.includes('Invalid token') || errorMessage.includes('token format') || errorMessage.includes('Authorization token missing');
+    const isUserNotFound = errorMessage.includes('User not found') || errorMessage.includes('Rider not found');
+    
+    // Only logout if we have multiple consecutive failures OR it's clearly a token issue
+    // But be more lenient - require 3 failures instead of 2
+    if (consecutiveAuthFailures >= 3 || (isTokenExpired && consecutiveAuthFailures >= 2) || (isInvalidToken && consecutiveAuthFailures >= 2) || isUserNotFound) {
+      console.error('❌ Multiple auth failures or token issue - logging out');
+      consecutiveAuthFailures = 0; // Reset counter
+      
+      // Clear auth data
+      localStorage.removeItem('auth');
+      localStorage.removeItem('token');
+      
+      // Only redirect if not already on login page
+      if (!isOnLoginPage) {
+        // Use setTimeout to prevent redirect loops
+        setTimeout(() => {
+          const currentPath = window.location.pathname;
+          if (!currentPath.includes('login') && !currentPath.includes('admin')) {
+            window.location.href = '/rider-login';
+          }
+        }, 100);
+      }
+    } else {
+      console.warn(`⚠️ Auth failure ${consecutiveAuthFailures}/${MAX_AUTH_FAILURES} - not logging out yet, will retry`);
+    }
+  } else if (status !== 401) {
+    // Reset counter on non-401 errors
+    consecutiveAuthFailures = 0;
+  }
+  
   return Promise.reject(error);
 };
 

@@ -38,9 +38,9 @@ export default function Navbar() {
   const handleMenuOpen = (event) => setAnchorEl(event.currentTarget);
   const handleMenuClose = () => setAnchorEl(null);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     const currentRole = role; // ✅ capture before logout
-    logout();
+    await logout();
 
     if (currentRole === "admin") navigate("/admin");
     else if (currentRole === "rider") navigate("/rider-login");

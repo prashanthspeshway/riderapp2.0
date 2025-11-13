@@ -31,16 +31,19 @@ export default function UserLogin() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
   const isValidMobile = (num) => /^[0-9]{10}$/.test(num);
+  const sanitizeMobile = (num) => (num || "").replace(/\D/g, "").slice(0, 10);
 
   const handleSendOtp = async () => {
     setMessage({ type: "", text: "" });
-    if (!mobile || !isValidMobile(mobile)) {
+    const cleaned = sanitizeMobile(mobile);
+    if (!cleaned || !isValidMobile(cleaned)) {
       setMessage({ type: "error", text: "Enter a valid 10-digit mobile number" });
       return;
     }
     try {
       setLoading(true);
-      const res = await sendOtp(mobile, "user");
+      // Use sanitized mobile to avoid spaces/newlines breaking backend lookup
+      const res = await sendOtp(cleaned, "user");
       if (res.data.success) {
         setStep(2);
         setMessage({ type: "success", text: "OTP sent! Check your mobile." });
@@ -48,7 +51,9 @@ export default function UserLogin() {
         setMessage({ type: "error", text: res.data.message || "Failed to send OTP" });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Server error while sending OTP" });
+      const apiMsg = err?.response?.data?.message;
+      const text = apiMsg || (err?.response?.status === 404 ? "User not found. Please sign up first." : "Server error while sending OTP");
+      setMessage({ type: "error", text });
     } finally {
       setLoading(false);
     }
@@ -56,13 +61,14 @@ export default function UserLogin() {
 
   const handleVerifyOtp = async () => {
     setMessage({ type: "", text: "" });
-    if (!otp || otp.length < 4) {
-      setMessage({ type: "error", text: "Enter a valid OTP" });
+    const cleanedMobile = sanitizeMobile(mobile);
+    if (!otp || otp.length !== 6) {
+      setMessage({ type: "error", text: "Enter a valid 6-digit OTP" });
       return;
     }
     try {
       setLoading(true);
-      const res = await verifyOtp(mobile, otp, "user");
+      const res = await verifyOtp(cleanedMobile, otp, "user");
       if (res.data.success) {
         login({
           token: res.data.token,
@@ -75,7 +81,9 @@ export default function UserLogin() {
         setMessage({ type: "error", text: res.data.message || "Invalid OTP" });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Server error while verifying OTP" });
+      const apiMsg = err?.response?.data?.message;
+      const text = apiMsg || "Server error while verifying OTP";
+      setMessage({ type: "error", text });
     } finally {
       setLoading(false);
     }
@@ -261,6 +269,7 @@ export default function UserLogin() {
                     OTP Verification
                   </Typography>
                 </Box>
+
 
                 <TextField 
                   fullWidth 

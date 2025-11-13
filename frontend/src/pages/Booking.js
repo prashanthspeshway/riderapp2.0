@@ -199,6 +199,28 @@ export default function Booking() {
   const { showSuccess, showError } = useNotification();
   const [cancelOpen, setCancelOpen] = useState(false);
 
+  // 📍 Geolocation permission and GPS state
+  const [geoPermission, setGeoPermission] = useState('prompt');
+  const [usingIpLocation, setUsingIpLocation] = useState(false);
+  const [gpsEnabled, setGpsEnabled] = useState(false);
+  const watchIdRef = useRef(null);
+
+  useEffect(() => {
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        navigator.permissions.query({ name: 'geolocation' }).then((res) => {
+          setGeoPermission(res.state);
+          res.onchange = () => setGeoPermission(res.state);
+        }).catch(() => {});
+      } catch (_) {}
+    }
+    return () => {
+      if (watchIdRef.current != null && navigator.geolocation) {
+        try { navigator.geolocation.clearWatch(watchIdRef.current); } catch (_) {}
+      }
+    };
+  }, []);
+
 
   const handleCall = () => {
     if (activeRide?.captainId?.mobile) {
@@ -282,7 +304,7 @@ export default function Booking() {
     }
   };
 
-  const GOOGLE_API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo"; // 🔑 Replace with your real key
+  const GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo"; // 🔑 Prefer env key for mobile/LAN builds
 
   // Load vehicle types safely inside the component
   useEffect(() => {
@@ -400,9 +422,21 @@ export default function Booking() {
       new Promise((resolve, reject) => {
         if (!navigator.geolocation) return reject(new Error("Geolocation not supported"));
         navigator.geolocation.getCurrentPosition(
-          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          (pos) => {
+            console.log("📍 GPS Location obtained:", {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              source: pos.coords.accuracy < 100 ? "GPS" : "Network"
+            });
+            resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          },
           (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+          { 
+            enableHighAccuracy: true,  // Force GPS on mobile
+            timeout: 15000,            // Longer timeout for GPS lock
+            maximumAge: 0             // Force fresh GPS reading, no cache
+          }
         );
       });
 
@@ -419,6 +453,7 @@ export default function Booking() {
         setPickup(loc);
         const addr = await getAddressFromCoords(loc.lat, loc.lng);
         setPickupAddress(addr);
+        setGpsEnabled(true);
       } catch (err) {
         console.warn("Geolocation error:", err?.message || err);
         try {
@@ -426,6 +461,7 @@ export default function Booking() {
           setPickup(loc);
           const addr = await getAddressFromCoords(loc.lat, loc.lng);
           setPickupAddress(addr);
+          setUsingIpLocation(true);
         } catch (ipErr) {
           console.error("IP geolocation fallback failed:", ipErr?.message || ipErr);
         }
@@ -434,6 +470,57 @@ export default function Booking() {
 
     initLocation();
   }, []);
+
+  // 📍 Explicit GPS request on user action (prompts on mobile)
+  const requestGps = async () => {
+    if (!navigator.geolocation) return;
+    try {
+      await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            console.log("📍 GPS Location updated:", {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              source: pos.coords.accuracy < 100 ? "GPS" : "Network"
+            });
+            const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            setPickup(loc);
+            getAddressFromCoords(loc.lat, loc.lng).then(setPickupAddress).catch(() => {});
+            if (mapRef.current) {
+              try { mapRef.current.panTo(loc); } catch (_) {}
+            }
+            setGpsEnabled(true);
+            setUsingIpLocation(false);
+            resolve(true);
+          },
+          (err) => {
+            console.warn('User GPS denied or unavailable:', err?.message || err);
+            reject(err);
+          },
+          { 
+            enableHighAccuracy: true,  // Force GPS on mobile
+            timeout: 20000,            // Longer timeout for GPS lock
+            maximumAge: 0               // Force fresh GPS reading, no cache
+          }
+        );
+      });
+      // Start watching for better accuracy during the session
+      try {
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          (pos) => {
+            const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            setPickup(loc);
+          },
+          () => {},
+          { 
+            enableHighAccuracy: true,  // Force GPS on mobile
+            maximumAge: 0              // Force fresh GPS reading
+          }
+        );
+      } catch (_) {}
+    } catch (_) {}
+  };
 
   // 🌍 Reverse geocode helper
   const getAddressFromCoords = async (lat, lng) => {
@@ -466,83 +553,110 @@ export default function Booking() {
     return cleaned;
   };
 
-  // 🔎 Fetch suggestions using Google AutocompleteService (with 50 km radius)
-  const fetchSuggestions = (input, setSuggestions, loc) => {
-    if (!input || !window.google) return setSuggestions([]);
+  // 🔎 Fetch suggestions with Google Places, fallback to OpenStreetMap Nominatim when Google fails
+  const fetchSuggestions = async (input, setSuggestions, loc) => {
+    if (!input) return setSuggestions([]);
 
-    const service = new window.google.maps.places.AutocompleteService();
-
-    service.getPlacePredictions(
-      {
-        input,
-        location: loc
-          ? new window.google.maps.LatLng(loc.lat, loc.lng)
-          : new window.google.maps.LatLng(17.385044, 78.486671), // Hyderabad fallback
-        radius: 50000, // ✅ 50 km
-        componentRestrictions: { country: "in" }, // ✅ restrict to India (optional)
-      },
-      (predictions, status) => {
-        if (
-          status === window.google.maps.places.PlacesServiceStatus.OK &&
-          predictions
-        ) {
-          setSuggestions(predictions);
-        } else {
-          setSuggestions([]);
-        }
+    // Preferred: Google Places Autocomplete
+    if (window.google && window.google.maps && window.google.maps.places) {
+      try {
+        const service = new window.google.maps.places.AutocompleteService();
+        service.getPlacePredictions(
+          {
+            input,
+            location: loc
+              ? new window.google.maps.LatLng(loc.lat, loc.lng)
+              : new window.google.maps.LatLng(17.385044, 78.486671), // Hyderabad fallback
+            radius: 50000, // ✅ 50 km
+            componentRestrictions: { country: "in" },
+          },
+          (predictions, status) => {
+            if (
+              status === window.google.maps.places.PlacesServiceStatus.OK &&
+              predictions
+            ) {
+              const normalized = predictions.map((p) => ({
+                provider: 'google',
+                id: p.place_id,
+                description: p.description,
+              }));
+              setSuggestions(normalized);
+            } else {
+              setSuggestions([]);
+            }
+          }
+        );
+        return;
+      } catch (err) {
+        // fall through to OSM
       }
-    );
+    }
+
+    // Fallback: OpenStreetMap Nominatim (no API key, client-friendly)
+    try {
+      const center = loc && loc.lat && loc.lng ? `${loc.lat},${loc.lng}` : `${17.385044},${78.486671}`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=6&q=${encodeURIComponent(input)}&viewbox=&bounded=0`;
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json' }
+      });
+      const data = await res.json();
+      const normalized = (Array.isArray(data) ? data : []).map((d) => ({
+        provider: 'osm',
+        id: d.place_id?.toString() || `${d.lat},${d.lon}`,
+        description: d.display_name || `${d.lat}, ${d.lon}`,
+        location: { lat: Number(d.lat), lng: Number(d.lon) },
+      }));
+      setSuggestions(normalized);
+    } catch (e) {
+      setSuggestions([]);
+    }
   };
 
-  const handlePickupSelect = async (placeId, description) => {
+  const handlePickupSelect = async (suggestion) => {
     try {
-      const service = new window.google.maps.places.PlacesService(
-        document.createElement("div")
-      );
-      service.getDetails(
-        { placeId, fields: ["geometry.location"] },
-        (place, status) => {
-          if (
-            status === window.google.maps.places.PlacesServiceStatus.OK &&
-            place.geometry
-          ) {
-            const loc = {
-              lat: place.geometry.location.lat(),
-              lng: place.geometry.location.lng(),
-            };
-            setPickup(loc);
-            setPickupAddress(cleanAddress(description));
-            setPickupSuggestions([]);
+      if (suggestion?.provider === 'google' && window.google && window.google.maps) {
+        const service = new window.google.maps.places.PlacesService(document.createElement("div"));
+        service.getDetails(
+          { placeId: suggestion.id, fields: ["geometry.location"] },
+          (place, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry) {
+              const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+              setPickup(loc);
+              setPickupAddress(cleanAddress(suggestion.description));
+              setPickupSuggestions([]);
+            }
           }
-        }
-      );
+        );
+      } else if (suggestion?.provider === 'osm' && suggestion.location) {
+        setPickup(suggestion.location);
+        setPickupAddress(cleanAddress(suggestion.description));
+        setPickupSuggestions([]);
+      }
     } catch (err) {
       console.error("Pickup place details failed:", err);
     }
   };
 
-  const handleDropSelect = async (placeId, description) => {
+  const handleDropSelect = async (suggestion) => {
     try {
-      const service = new window.google.maps.places.PlacesService(
-        document.createElement("div")
-      );
-      service.getDetails(
-        { placeId, fields: ["geometry.location"] },
-        (place, status) => {
-          if (
-            status === window.google.maps.places.PlacesServiceStatus.OK &&
-            place.geometry
-          ) {
-            const loc = {
-              lat: place.geometry.location.lat(),
-              lng: place.geometry.location.lng(),
-            };
-            setDrop(loc);
-            setDropAddress(cleanAddress(description));
-            setDropSuggestions([]);
+      if (suggestion?.provider === 'google' && window.google && window.google.maps) {
+        const service = new window.google.maps.places.PlacesService(document.createElement("div"));
+        service.getDetails(
+          { placeId: suggestion.id, fields: ["geometry.location"] },
+          (place, status) => {
+            if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry) {
+              const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+              setDrop(loc);
+              setDropAddress(cleanAddress(suggestion.description));
+              setDropSuggestions([]);
+            }
           }
-        }
-      );
+        );
+      } else if (suggestion?.provider === 'osm' && suggestion.location) {
+        setDrop(suggestion.location);
+        setDropAddress(cleanAddress(suggestion.description));
+        setDropSuggestions([]);
+      }
     } catch (err) {
       console.error("Drop place details failed:", err);
     }
@@ -889,8 +1003,8 @@ export default function Booking() {
               />
               {pickupSuggestions.map((s, i) => (
                 <ListItemButton
-                  key={i}
-                  onClick={() => handlePickupSelect(s.place_id, s.description)}
+                  key={s.id || i}
+                  onClick={() => handlePickupSelect(s)}
                 >
                   {s.description}
                 </ListItemButton>
@@ -910,8 +1024,8 @@ export default function Booking() {
               />
               {dropSuggestions.map((s, i) => (
                 <ListItemButton
-                  key={i}
-                  onClick={() => handleDropSelect(s.place_id, s.description)}
+                  key={s.id || i}
+                  onClick={() => handleDropSelect(s)}
                 >
                   {s.description}
                 </ListItemButton>
@@ -980,6 +1094,55 @@ export default function Booking() {
                         </Card>
                       );
                     })}
+
+                    {/* Parcel option */}
+                    {!typesLoading && !typesError && (
+                      <Card
+                        key="m-parcel"
+                        onClick={() => navigate('/parcel')}
+                        sx={{
+                          cursor: 'pointer',
+                          border: '1px solid',
+                          borderColor: 'grey.300',
+                          '&:hover': { borderColor: 'black' },
+                          minHeight: 56
+                        }}
+                      >
+                        <CardContent sx={{ p: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                              <Avatar 
+                                src={getVehicleImage('parcel')} 
+                                sx={{ 
+                                  mr: 1, 
+                                  width: 40, 
+                                  height: 40,
+                                  bgcolor: 'grey.100',
+                                  '& img': {
+                                    objectFit: 'contain'
+                                  }
+                                }}
+                              >
+                                <ShoppingBag />
+                              </Avatar>
+                              <Box sx={{ flex: 1 }}>
+                                <Typography variant="body2" sx={{ mb: 0.25 }}>
+                                  Parcel
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Send packages and documents • 3 min
+                                </Typography>
+                              </Box>
+                            </Box>
+                            <Box sx={{ textAlign: 'right' }}>
+                              <Typography variant="body2" sx={{ color: 'text.primary' }}>
+                                View
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    )}
                   </Box>
 
                   {/* Request Button */}
@@ -1056,8 +1219,8 @@ export default function Booking() {
           />
           {pickupSuggestions.map((s, i) => (
             <ListItemButton
-              key={i}
-              onClick={() => handlePickupSelect(s.place_id, s.description)}
+              key={s.id || i}
+              onClick={() => handlePickupSelect(s)}
             >
               {s.description}
             </ListItemButton>
@@ -1082,8 +1245,8 @@ export default function Booking() {
           />
           {dropSuggestions.map((s, i) => (
             <ListItemButton
-              key={i}
-              onClick={() => handleDropSelect(s.place_id, s.description)}
+              key={s.id || i}
+              onClick={() => handleDropSelect(s)}
             >
               {s.description}
             </ListItemButton>
@@ -1478,233 +1641,71 @@ export default function Booking() {
         </div>
       )}
 
-      
-      {/* Backdrop */}
-      {isMobile && drop && !showDriverDetails && bottomSheetVisible && (
-        <Box
-          sx={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 1299,
-            opacity: sheetExpanded ? 1 : 0,
-            transition: 'opacity 0.3s ease',
-            pointerEvents: sheetExpanded ? 'auto' : 'none'
-          }}
-          onClick={() => {
-            setSheetExpanded(false);
-            setBottomSheetVisible(false);
-          }}
-        />
-      )}
-
-      {/* Uber-like Mobile Bottom Sheet */}
-      {isMobile && drop && !showDriverDetails && bottomSheetVisible && (
-        <Box
-          ref={bottomSheetRef}
-          sx={{
-            position: 'fixed',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: '42vh',
-            backgroundColor: 'white',
+      {/* Rider details drawer */}
+      <Drawer
+        anchor="bottom"
+        open={riderPanelOpen}
+        onClose={() => setRiderPanelOpen(false)}
+        PaperProps={{
+          sx: {
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
-            boxShadow: '0 -4px 20px rgba(0,0,0,0.15)',
-            display: 'flex',
-            flexDirection: 'column',
-            transition: 'height 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-            zIndex: 1300,
-            overflow: 'hidden'
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Drag handle */}
-          <Box
-            sx={{
-              width: 40,
-              height: 4,
-              bgcolor: 'grey.400',
-              borderRadius: 2,
-              mx: 'auto',
-              mt: 1.5,
-              mb: 1,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                bgcolor: 'grey.500',
-                transform: 'scaleX(1.2)'
-              },
-              '&:active': {
-                transform: 'scale(0.9)'
-              }
-            }}
-            onClick={() => { /* fixed container; no expand */ }}
-          />
-        
-        <Box ref={scrollableContentRef} sx={{ p: 2, overflowY: 'auto', flex: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-            <Typography
-              variant="h6"
-              component="div"
-            >
-              Choose a ride
-            </Typography>
-          </Box>
-          
-
-
-          
-
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {typesLoading && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, py: 2 }}>
-                <CircularProgress size={20} />
-                <Typography variant="body2">Loading vehicle types…</Typography>
+            maxHeight: '80vh'
+          }
+        }}
+      >
+        <Box sx={{ p: 3 }}>
+          {assignedRider && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                <Box sx={{
+                  width: 4,
+                  height: 40,
+                  bgcolor: 'success.main',
+                  borderRadius: 2,
+                  mr: 2
+                }} />
+                <Typography variant="h5">
+                  {assignedRider.fullName || assignedRider.name || 'Rider'}
+                </Typography>
               </Box>
-            )}
-            {typesError && (
-              <Alert severity="error" sx={{ mx: 1 }}>{typesError}</Alert>
-            )}
-
-            {!typesLoading && !typesError && vehicleTypes.filter(t => t.active && !['scooty','car_ac','car_6'].includes((t.code || '').toLowerCase())).map((t) => {
-              const code = t.code || t.name?.toLowerCase() || "car";
-              const icon = getIconForCode(code);
-              const etaMin = duration ? Math.max(1, Math.round(duration / 3)) : 3;
-              const price = estimatePriceForCode(code, distance);
-              const description = `${t.seats || 4} seats • ${t.ac ? 'AC' : 'Non-AC'}`;
-
-              return (
-                <Card
-                  key={`m-${code}`}
-                  onClick={() => setSelectedRide(code)}
-                  sx={{
-                    cursor: 'pointer',
-                    border: selectedRide === code ? '2px solid' : '1px solid',
-                    borderColor: selectedRide === code ? 'primary.main' : 'grey.300',
-                    '&:hover': { borderColor: 'primary.main' }
-                  }}
-                >
-                  <CardContent sx={{ p: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                          <Avatar 
-                            src={getVehicleImage(code)} 
-                            sx={{ 
-                              mr: 1, 
-                              width: 40, 
-                              height: 40,
-                              bgcolor: 'grey.100',
-                              '& img': {
-                                objectFit: 'contain',
-                                padding: '6px'
-                              }
-                            }}
-                          >
-                            {getVehicleIcon(code)}
-                          </Avatar>
-                        <Box sx={{ flex: 1 }}>
-                          <Typography variant="body2" sx={{ mb: 0.25 }}>
-                            {t.name || 'Car'}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {description} • {etaMin} min
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="body2">
-                          {price}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              );
-            })}
-
-            {!typesLoading && !typesError && (
-              <Card
-                key="m-parcel"
-                onClick={() => navigate('/parcel')}
-                sx={{
-                  cursor: 'pointer',
-                  border: '1px solid',
-                  borderColor: 'grey.300'
-                }}
-              >
-                <CardContent sx={{ p: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-                      <Avatar 
-                        src={getVehicleImage('parcel')} 
-                        sx={{ 
-                          mr: 1, 
-                          width: 40, 
-                          height: 40,
-                          bgcolor: 'grey.100',
-                          '& img': {
-                            objectFit: 'contain',
-                            padding: '6px'
-                          }
-                        }}
-                      >
-                        <ShoppingBag />
-                      </Avatar>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" sx={{ mb: 0.25 }}>
-                          Parcel
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Send packages and documents • 3 min
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="body2" sx={{ color: 'text.primary' }}>
-                        View
+              <Card sx={{ mb: 3 }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Avatar sx={{
+                      width: 60,
+                      height: 60,
+                      bgcolor: 'primary.main',
+                      mr: 2,
+                      fontSize: '1.5rem'
+                    }}>
+                      {assignedRider.fullName?.charAt(0) || 'D'}
+                    </Avatar>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="h6">
+                        {assignedRider.fullName}
                       </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Star sx={{ color: 'warning.main', fontSize: 20 }} />
+                        <Typography variant="body2" color="text.secondary">
+                          {assignedRider.rating || '4.5'} • {assignedRider.mobile}
+                        </Typography>
+                      </Box>
                     </Box>
                   </Box>
                 </CardContent>
               </Card>
-            )}
-          </Box>
-
-          {/* Payment method removed per design */}
-
-          {/* Request button */}
-          <Button
-            variant="contained"
-            fullWidth
-            disabled={!drop || !selectedRide || lookingForRider}
-            onClick={handleFindRiders}
-            sx={{ 
-              mt: 2, 
-              py: 1.5
-            }}
-          >
-            {lookingForRider ? (
-              <>
-                <CircularProgress size={20} sx={{ mr: 1 }} color="inherit" />
-                Looking for drivers...
-              </>
-            ) : !drop ? (
-              "Set drop location first"
-            ) : !selectedRide ? (
-              "Select Vehicle Type First"
-            ) : (
-              `Request ${vehicleTypes.find(v => (v.code || v.name?.toLowerCase()) === selectedRide)?.name || selectedRide}`
-            )}
-          </Button>
+            </>
+          )}
         </Box>
-      </Box>
-      )}
+      </Drawer>
+
+      {/* Rider details drawer */}
+          
+
+
+          
+
 
       {/* Rider details drawer */}
       <Drawer 

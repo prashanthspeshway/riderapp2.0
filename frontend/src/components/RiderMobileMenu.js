@@ -165,9 +165,9 @@ const RiderMobileMenu = () => {
           {/* Logout */}
           <ListItem 
             button 
-            onClick={() => { 
+            onClick={async () => { 
               setDrawerOpen(false);
-              logout();
+              await logout();
               navigate('/rider-login');
             }}
             sx={{ py: 1.5 }}

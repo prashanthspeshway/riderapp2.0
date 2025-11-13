@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import axios from "axios";
+import { API_BASE } from "../services/api";
 import {
   GoogleMap,
   Marker,
@@ -137,7 +138,7 @@ export default function Map({
     const fetchOnlineRiders = async () => {
       try {
         // Always fetch all riders; rely on client-side filtering for display
-        const response = await axios.get('http://localhost:5000/api/rider/online');
+        const response = await axios.get(`${API_BASE}/api/rider/online`);
         const data = response?.data || {};
         console.log('📍 Fetched online riders response:', data);
         const list = data.riders || data.drivers || data.captains || data.data || [];
@@ -161,16 +162,68 @@ export default function Map({
     };
 
     fetchOnlineRiders();
-    // Refresh every 5 seconds for live updates (update when filter changes)
-    const interval = setInterval(fetchOnlineRiders, 5000);
+    // Refresh every 3 seconds for live updates (faster refresh to catch offline status)
+    const interval = setInterval(fetchOnlineRiders, 3000);
     return () => clearInterval(interval);
   }, [filterVehicleType]);
 
-  const { isLoaded } = useJsApiLoader({
+  // Log API key and current URL for debugging
+  useEffect(() => {
+    console.log('🗺️ Map Component Debug Info:');
+    console.log('  - API Key:', apiKey ? `${apiKey.substring(0, 10)}...` : 'MISSING');
+    console.log('  - Current URL:', typeof window !== 'undefined' ? window.location.href : 'N/A');
+    console.log('  - Hostname:', typeof window !== 'undefined' ? window.location.hostname : 'N/A');
+    console.log('  - Protocol:', typeof window !== 'undefined' ? window.location.protocol : 'N/A');
+  }, [apiKey]);
+
+  const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: apiKey,
     libraries: LIBRARIES, // ✅ Static libraries array to fix performance warning
   });
+
+  const [authError, setAuthError] = useState(null);
+  const [apiKeyError, setApiKeyError] = useState(null);
+  
+  useEffect(() => {
+    const handler = () => {
+      console.error('❌ Google Maps API authentication failed (gm_authFailure callback)');
+      console.error('  - This usually means the API key is restricted and does not allow this domain');
+      console.error('  - Current domain:', typeof window !== 'undefined' ? window.location.hostname : 'unknown');
+      setAuthError('gm_authFailure');
+      setApiKeyError('API key authentication failed. Please check Google Cloud Console settings.');
+    };
+    // Detect Google auth failures (e.g., referer not allowed)
+    window.gm_authFailure = handler;
+    return () => {
+      if (window.gm_authFailure === handler) {
+        delete window.gm_authFailure;
+      }
+    };
+  }, []);
+
+  // Log loading state and errors for debugging
+  useEffect(() => {
+    console.log('🗺️ Google Maps Loader State:', { isLoaded, loadError: loadError?.message || loadError });
+    if (loadError) {
+      console.error('❌ Google Maps API load error:', loadError);
+      console.error('  - Error details:', JSON.stringify(loadError, null, 2));
+      setApiKeyError(`Failed to load Google Maps: ${loadError.message || 'Unknown error'}`);
+    }
+  }, [isLoaded, loadError]);
+
+  // Check if script is actually loading
+  useEffect(() => {
+    const checkScript = setInterval(() => {
+      const script = document.querySelector('script[src*="maps.googleapis.com"]');
+      if (script) {
+        console.log('✅ Google Maps script tag found:', script.src);
+        clearInterval(checkScript);
+      }
+    }, 500);
+    
+    return () => clearInterval(checkScript);
+  }, []);
 
   // 🗺️ Custom map styling to remove clutter and show only essential hotspots
   const mapStyles = [
@@ -246,6 +299,12 @@ export default function Map({
     if (!pickup) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          console.log("📍 Map GPS Location:", {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            source: pos.coords.accuracy < 100 ? "GPS" : "Network"
+          });
           const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setPickup(loc);
           getAddressFromCoords(loc.lat, loc.lng, setPickupAddress);
@@ -262,6 +321,11 @@ export default function Map({
             DEFAULT_PICKUP.lng,
             setPickupAddress
           );
+        },
+        { 
+          enableHighAccuracy: true,  // Force GPS on mobile
+          timeout: 15000,            // Longer timeout for GPS lock
+          maximumAge: 0               // Force fresh GPS reading, no cache
         }
       );
     }
@@ -339,6 +403,44 @@ export default function Map({
     }
   }, [pickup, drop, riderLocation]);
 
+
+  if (loadError || authError) {
+    const center = pickup && pickup.lat && pickup.lng ? pickup : DEFAULT_PICKUP;
+    const q = `${center.lat},${center.lng}`;
+    const currentUrl = typeof window !== 'undefined' ? window.location.hostname : 'unknown';
+    const isNgrok = /ngrok\-free\.app$/.test(currentUrl);
+    
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <div style={{
+          position: 'absolute', top: 8, left: 8, right: 8, zIndex: 2,
+          background: 'rgba(255,255,255,0.95)', color: '#111',
+          padding: '12px 16px', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠️ Google Maps API Error</div>
+          <div style={{ fontSize: 12, marginBottom: 8 }}>
+            {apiKeyError || 'The Google Maps API failed to load. Showing an embedded map.'}
+          </div>
+          {isNgrok && (
+            <div style={{ fontSize: 11, color: '#d32f2f', marginTop: 8, padding: 8, background: '#ffebee', borderRadius: 4 }}>
+              <strong>🔧 Fix for ngrok:</strong><br/>
+              1. Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{color: '#1976d2'}}>Google Cloud Console</a><br/>
+              2. Find your API key<br/>
+              3. Under "Application restrictions" → Add your ngrok domain: <code>{currentUrl}</code><br/>
+              4. Or set restrictions to "None" for testing
+            </div>
+          )}
+        </div>
+        <iframe
+          title="Map Fallback"
+          style={{ width: '100%', height: '100%', border: 0 }}
+          src={`https://www.google.com/maps?q=${encodeURIComponent(q)}&z=14&output=embed`}
+          allowFullScreen
+          loading="lazy"
+        />
+      </div>
+    );
+  }
 
   if (!isLoaded) return <p>Loading Map...</p>;
 

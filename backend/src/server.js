@@ -168,28 +168,53 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
   'http://183.83.218.240:3000',
+  // LAN IPs used for mobile testing
+  'http://192.168.1.13:3000',
+  'http://192.168.1.13:3001',
+  'http://192.168.1.13:3031',
+  'http://192.168.56.1:3000',
+  'http://192.168.56.1:3001',
 ];
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) {
       return callback(null, true);
     }
+    
+    // Allow dev tools and local network origins
+    const isLanOrigin = origin && /^http:\/\/(192\.168|10\.|172\.(1[6-9]|2[0-9]|3[01]))\./.test(origin);
+    // Allow HTTPS ngrok frontend origins (required for mobile GPS permissions)
+    const isNgrokOrigin = origin && /^https:\/\/.*\.ngrok\-free\.app$/.test(origin);
+    
+    if (allowedOrigins.includes(origin) || isLanOrigin || isNgrokOrigin) {
+      return callback(null, true);
+    }
+    
     console.log("❌ Blocked by CORS:", origin);
     return callback(new Error('Not allowed by CORS: ' + origin));
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+// Body parsing - must come before routes
 app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Request logger
+// Request logger - log after body parsing
 app.use((req, res, next) => {
-  console.log(
-    `[${new Date().toISOString()}] ➡️ ${req.method} ${req.originalUrl} | Body:`,
-    req.body
-  );
+  // Only log for API routes to reduce noise
+  if (req.path.startsWith('/api')) {
+    console.log(
+      `[${new Date().toISOString()}] ➡️ ${req.method} ${req.originalUrl}`
+    );
+    if (Object.keys(req.body || {}).length > 0) {
+      console.log('  Body:', JSON.stringify(req.body));
+    }
+  }
   next();
 });
 
@@ -341,8 +366,10 @@ if (fs.existsSync(frontendPath)) {
 }
 
 // === Start server ===
-server.listen(config.port, () =>
-  console.log(`🚀 Server running on port ${config.port}`)
-);
+server.listen(config.port, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${config.port}`);
+  console.log(`🌐 Server accessible on local network at http://0.0.0.0:${config.port}`);
+  console.log(`💡 Find your local IP address to access from mobile devices`);
+});
 
 module.exports = app;

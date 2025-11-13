@@ -38,6 +38,7 @@ import {
 } from "@mui/icons-material";
 import { useJsApiLoader, GoogleMap, Marker, DirectionsRenderer, Autocomplete } from "@react-google-maps/api";
 import axios from "axios";
+import { API_BASE } from "../services/api";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useNotification } from "../contexts/NotificationContext";
@@ -95,6 +96,12 @@ export default function Parcel() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          console.log("📍 Parcel GPS Location:", {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            source: position.coords.accuracy < 100 ? "GPS" : "Network"
+          });
           const pos = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
@@ -108,6 +115,11 @@ export default function Parcel() {
           setCurrentLocation({ lat: 12.9716, lng: 77.5946 }); // Bangalore
           setPickup({ lat: 12.9716, lng: 77.5946 });
           setMapLoading(false);
+        },
+        { 
+          enableHighAccuracy: true,  // Force GPS on mobile
+          timeout: 15000,            // Longer timeout for GPS lock
+          maximumAge: 0              // Force fresh GPS reading, no cache
         }
       );
     }
@@ -225,7 +237,7 @@ export default function Parcel() {
     }
 
     try {
-      const res = await axios.post("http://localhost:5000/api/parcels", {
+      const res = await axios.post(`${API_BASE}/api/parcels`, {
         ...form,
         pickup: pickup,
         drop: drop,

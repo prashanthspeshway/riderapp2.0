@@ -541,9 +541,9 @@ export default function Profile() {
               <Button
                 variant="contained"
                 color="error"
-                onClick={() => {
+                onClick={async () => {
                   if (window.confirm('Are you sure you want to logout?')) {
-                    logout();
+                    await logout();
                     navigate('/login');
                   }
                 }}

@@ -65,6 +65,7 @@ import {
   Logout
 } from "@mui/icons-material";
 import axios from "axios";
+import { API_BASE } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import socket from "../../services/socket";
@@ -76,8 +77,8 @@ import ChatNotification from "../../components/ChatNotification";
 import RideNotification from "../../components/RideNotification";
 import OTPVerificationModal from "../../components/OTPVerificationModal";
 
-// Google Maps API Key
-const GOOGLE_API_KEY = "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo";
+// Google Maps API Key (prefer env at runtime for LAN/mobile)
+const GOOGLE_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "AIzaSyAWstISB_4yTFzsAolxk8SOMBZ_7_RaKQo";
 
 // Notification sound function
 const playNotificationSound = () => {
@@ -154,26 +155,57 @@ export default function RiderDashboard() {
   const [duration, setDuration] = useState(null);
 
   useEffect(() => {
-    // Check if user is authenticated
+    // Early return if not authenticated - don't make any API calls
     if (!auth?.user || !auth?.token) {
-      console.log("No auth data found, redirecting to login");
-      navigate("/login");
-      return;
+      console.log("❌ No auth data found, redirecting to rider login");
+      console.log("  - Auth object:", auth);
+      console.log("  - Token in localStorage:", !!localStorage.getItem("auth"));
+      // Don't navigate immediately, let the user see what's wrong
+      setTimeout(() => {
+        navigate("/rider-login");
+      }, 100);
+      return; // IMPORTANT: Return early to prevent API calls
     }
+    
+    // Validate token format
+    const token = auth.token;
+    if (typeof token !== 'string' || token.length < 10) {
+      console.error("❌ Invalid token format");
+      showError("Invalid session. Please login again.");
+        setTimeout(async () => {
+          await logout();
+          navigate("/rider-login");
+        }, 1000);
+      return; // IMPORTANT: Return early to prevent API calls
+    }
+    
+    console.log("✅ Auth check passed - User:", auth.user?.mobile, "Role:", auth.user?.role);
 
-    // Load rider data
+    // Load rider data - only called if auth is valid
     const loadRiderData = async () => {
+      // Double check auth before making any API call
+      if (!auth?.token || !auth?.user) {
+        console.log("❌ loadRiderData - No auth, skipping API call");
+        return;
+      }
+      
       try {
         const token = auth.token;
-        if (!token) {
-          console.log("No token in auth context, redirecting to login");
-          navigate("/login");
+        if (!token || typeof token !== 'string' || token.length < 10) {
+          console.log("❌ Invalid token format, skipping API call");
           return;
         }
         
-        const response = await axios.get(`http://localhost:5000/api/rider/status`, {
+        console.log('🔄 Loading rider data...');
+        console.log('  - API Base:', API_BASE);
+        console.log('  - Token present:', !!token);
+        console.log('  - User ID:', auth.user?._id);
+        
+        const response = await axios.get(`${API_BASE}/api/rider/status`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
+        console.log('✅ Rider data response:', response.data);
         
         if (response.data.success) {
           const riderData = response.data.rider;
@@ -197,23 +229,48 @@ export default function RiderDashboard() {
           });
         }
       } catch (error) {
-        console.error("Error loading rider data:", error);
+        console.error("❌ Error loading rider data:", error);
+        console.error("  - Error type:", error.response ? 'API Error' : 'Network Error');
+        console.error("  - Status:", error.response?.status);
+        console.error("  - Message:", error.message);
         
-        if (error.response?.status === 401) {
-          console.log("Authentication error, redirecting to login");
-          showError("Session expired. Please login again.");
-          logout();
-          navigate("/login");
+        // Check if request was cancelled due to missing token
+        if (error.isCancel || axios.isCancel?.(error) || error.message === 'No authentication token available' || error.message === 'Request cancelled') {
+          console.log("⚠️ Request cancelled - no token available");
+          return; // Don't show error, just return
+        }
+        
+        if (!error.response) {
+          // Network error - don't redirect, just set defaults
+          console.warn("⚠️ Network error - API not reachable, using defaults");
+          setIsOnline(false);
+          setIsAvailable(false);
+        } else if (error.response?.status === 401) {
+          // Only logout if we actually had a token (means it's invalid/expired)
+          const hadToken = auth?.token && auth.token.length > 10;
+          if (hadToken) {
+            console.log("❌ Authentication error - token invalid/expired");
+            showError("Session expired. Please login again.");
+            await logout();
+            navigate("/rider-login");
+          } else {
+            console.log("⚠️ 401 but no token - likely not logged in yet");
+          }
         } else {
-          console.log("API error, setting default values:", error.message);
+          console.log("⚠️ API error, setting default values:", error.message);
           setIsOnline(false);
           setIsAvailable(false);
         }
       }
     };
 
-    loadRiderData();
-    fetchPendingRides();
+    // Only make API calls if we have valid auth
+    if (auth?.token && auth?.user) {
+      loadRiderData();
+      fetchPendingRides();
+    } else {
+      console.warn("⚠️ Skipping API calls - no valid auth");
+    }
 
     // Socket.IO connection
     socket.on("connect", () => {
@@ -324,24 +381,174 @@ export default function RiderDashboard() {
     };
   }, [auth, navigate, showSuccess]);
 
+  // GPS Location Tracking - Update location continuously while online
+  useEffect(() => {
+    if (!isOnline || !auth?.token) {
+      return;
+    }
+    
+    console.log("📍 Starting GPS tracking for online rider");
+    
+    // Update location every 10 seconds while online
+    const locationInterval = setInterval(async () => {
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            resolve,
+            reject,
+            {
+              enableHighAccuracy: true, // Force GPS on mobile
+              timeout: 10000,
+              maximumAge: 0 // Force fresh GPS reading
+            }
+          );
+        });
+        
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        
+        console.log("📍 GPS Location update:", location, "Accuracy:", position.coords.accuracy);
+        
+        // Update location on server
+        try {
+          await axios.put(
+            `${API_BASE}/api/rider/location`,
+            {
+              lat: location.lat,
+              lng: location.lng
+            },
+            { headers: { Authorization: `Bearer ${auth.token}` } }
+          );
+          
+          // Update local state for map
+          setRiderLocation(location);
+          console.log("✅ Location updated on server");
+        } catch (locError) {
+          console.error("❌ Error updating location:", locError);
+        }
+      } catch (gpsError) {
+        console.error("❌ GPS error:", gpsError);
+      }
+    }, 10000); // Update every 10 seconds
+    
+    return () => {
+      clearInterval(locationInterval);
+      console.log("📍 Stopped GPS tracking");
+    };
+  }, [isOnline, auth?.token]);
+
+  // Inactivity Detection - Auto-offline after 10 minutes
+  useEffect(() => {
+    if (!isOnline || !auth?.token) {
+      return;
+    }
+    
+    let inactivityTimer;
+    let lastActivityTime = Date.now();
+    
+    const resetTimer = () => {
+      lastActivityTime = Date.now();
+      clearTimeout(inactivityTimer);
+      
+      // Set timer for 10 minutes (600000 ms)
+      inactivityTimer = setTimeout(async () => {
+        const timeSinceActivity = Date.now() - lastActivityTime;
+        if (timeSinceActivity >= 600000) { // 10 minutes
+          console.log("⏰ Rider inactive for 10 minutes, going offline");
+          try {
+            await axios.put(
+              `${API_BASE}/api/rider/status`,
+              { isOnline: false },
+              { headers: { Authorization: `Bearer ${auth.token}` } }
+            );
+            setIsOnline(false);
+            setIsAvailable(false);
+            showError("You've been inactive for 10 minutes. Going offline.");
+          } catch (error) {
+            console.error("❌ Error setting offline due to inactivity:", error);
+          }
+        }
+      }, 600000);
+    };
+    
+    // Track user activity
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(event => {
+      window.addEventListener(event, resetTimer, true);
+    });
+    
+    // Initialize timer
+    resetTimer();
+    
+    return () => {
+      clearTimeout(inactivityTimer);
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, resetTimer, true);
+      });
+    };
+  }, [isOnline, auth?.token, showError]);
+
   // Removed slider event handlers
 
   const fetchPendingRides = async (silent = false) => {
+    // Guard: Don't make API call if not authenticated
+    if (!auth?.token || !auth?.user) {
+      console.warn('⚠️ Skipping fetchPendingRides - not authenticated');
+      return;
+    }
+    
     try {
       if (!silent) setLoading(true);
       
+      console.log('🔄 Fetching pending rides...');
+      console.log('  - Auth token:', auth?.token ? 'Present' : 'Missing');
+      console.log('  - API Base:', API_BASE);
+      
       const response = await getPendingRides();
+      
+      console.log('✅ Pending rides response:', response.data);
       
       if (response.data?.success) {
         setRides(response.data.rides || []);
+        console.log('✅ Loaded', response.data.rides?.length || 0, 'pending rides');
       } else {
-        if (!silent) showError("Failed to fetch rides");
+        console.warn('⚠️ API returned success=false:', response.data);
+        if (!silent) showError(response.data?.message || "Failed to fetch rides");
       }
     } catch (error) {
-      console.error("Error fetching rides:", error);
+      console.error("❌ Error fetching rides:", error);
+      console.error("  - Error type:", error.response ? 'API Error' : 'Network Error');
+      console.error("  - Status:", error.response?.status);
+      console.error("  - Message:", error.message);
+      console.error("  - Response data:", error.response?.data);
+      
+      // Check if request was cancelled due to missing token
+      if (error.isCancel || axios.isCancel?.(error) || error.message === 'No authentication token available' || error.message === 'Request cancelled') {
+        console.log("⚠️ Request cancelled - no token available");
+        return; // Don't show error, just return
+      }
+      
       if (!silent) {
-        if (error.response?.data?.error) {
+        // Distinguish between network errors and auth errors
+        if (!error.response) {
+          // Network error - API not reachable
+          showError("Cannot connect to server. Check your connection.");
+        } else if (error.response?.status === 401) {
+          // Only logout if we actually had a token (means it's invalid/expired)
+          const hadToken = auth?.token && auth.token.length > 10;
+          if (hadToken) {
+            showError("Session expired. Please login again.");
+            await logout();
+            navigate("/rider-login");
+          } else {
+            console.log("⚠️ 401 but no token - likely not logged in yet");
+          }
+        } else if (error.response?.data?.error) {
           showError(error.response.data.error);
+        } else if (error.response?.data?.message) {
+          showError(error.response.data.message);
         } else {
           showError("Failed to fetch rides");
         }
@@ -362,8 +569,52 @@ export default function RiderDashboard() {
         return;
       }
       
+      // If going online, get current GPS location first
+      let currentLocation = null;
+      if (newOnlineStatus) {
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              resolve,
+              reject,
+              {
+                enableHighAccuracy: true, // Force GPS on mobile
+                timeout: 10000,
+                maximumAge: 0 // Force fresh GPS reading
+              }
+            );
+          });
+          
+          currentLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          
+          console.log("📍 GPS Location obtained for going online:", currentLocation);
+          
+          // Update location immediately when going online
+          try {
+            await axios.put(
+              `${API_BASE}/api/rider/location`,
+              {
+                lat: currentLocation.lat,
+                lng: currentLocation.lng
+              },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            console.log("✅ Location updated when going online");
+          } catch (locError) {
+            console.warn("⚠️ Could not update location:", locError);
+          }
+        } catch (gpsError) {
+          console.error("❌ GPS error when going online:", gpsError);
+          showError("Could not get GPS location. Please enable location services.");
+          return;
+        }
+      }
+      
       const response = await axios.put(
-        `http://localhost:5000/api/rider/status`,
+        `${API_BASE}/api/rider/status`,
         { isOnline: newOnlineStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -390,7 +641,7 @@ export default function RiderDashboard() {
       
       if (error.response?.status === 401) {
         showError("Session expired. Please login again.");
-        logout();
+        await logout();
         navigate("/login");
       } else if (error.response?.data?.message) {
         showError(error.response.data.message);
@@ -413,7 +664,7 @@ export default function RiderDashboard() {
           // Fetch full ride details immediately after acceptance
           try {
             const rideDetailsResponse = await axios.get(
-              `http://localhost:5000/api/rides/${acceptedRide._id}`,
+              `${API_BASE}/api/rides/${acceptedRide._id}`,
               { headers: { Authorization: `Bearer ${auth?.token}` } }
             );
             
@@ -505,10 +756,18 @@ export default function RiderDashboard() {
 
   const handleCancelRide = async (rideId) => {
     try {
+      const token = auth?.token;
+      if (!token) {
+        showError("Please login again");
+        await logout();
+        navigate("/rider-login");
+        return;
+      }
+      
       const response = await axios.put(
-        `http://localhost:5000/api/rides/${rideId}/cancel`,
+        `${API_BASE}/api/rides/${rideId}/cancel`,
         {},
-        { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       
       if (response.data.success) {
@@ -529,7 +788,7 @@ export default function RiderDashboard() {
     try {
       // Fetch the complete ride details from backend
       const response = await axios.get(
-        `http://localhost:5000/api/rides/${rideId}`,
+        `${API_BASE}/api/rides/${rideId}`,
         { headers: { Authorization: `Bearer ${auth?.token}` } }
       );
       

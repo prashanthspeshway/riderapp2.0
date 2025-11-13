@@ -423,10 +423,17 @@ const deleteRider = async (req, res) => {
 const getRiderStatus = async (req, res) => {
   try {
     const riderId = req.user._id; // From JWT token (normalized)
-    console.log('🔍 Getting rider status for ID:', riderId);
+    // Removed verbose logging
 
-    // Check Rider collection only
-    const rider = await Rider.findById(riderId);
+    // Check BOTH Rider collection and User collection
+    let rider = await Rider.findById(riderId);
+    let isOldRider = false;
+
+    if (!rider) {
+      // Try User collection for old riders
+      rider = await User.findOne({ _id: riderId, role: "rider" });
+      isOldRider = true;
+    }
 
     if (!rider) {
       return res.status(404).json({
@@ -435,22 +442,23 @@ const getRiderStatus = async (req, res) => {
       });
     }
 
-    // Return rider data from riders collection
+    // Return rider data (handle both collection formats)
     const riderData = {
       _id: rider._id,
-      firstName: rider.firstName,
-      lastName: rider.lastName,
+      firstName: isOldRider ? null : rider.firstName,
+      lastName: isOldRider ? null : rider.lastName,
+      fullName: isOldRider ? rider.fullName : `${rider.firstName} ${rider.lastName}`,
       email: rider.email,
       mobile: rider.mobile,
-      status: rider.status,
+      status: isOldRider ? rider.approvalStatus : rider.status,
       isOnline: rider.isOnline || false,
       isAvailable: rider.isAvailable || false,
-      profilePicture: rider.profilePicture,
+      profilePicture: rider.profilePicture || rider.profileImage || null,
       createdAt: rider.createdAt,
       updatedAt: rider.updatedAt
     };
 
-    console.log('✅ Rider status retrieved:', riderData.firstName, riderData.status);
+    // Removed verbose logging
     res.json({
       success: true,
       rider: riderData
@@ -472,10 +480,17 @@ const updateRiderOnlineStatus = async (req, res) => {
     const riderId = req.user._id; // From JWT token (normalized)
     const { isOnline, isAvailable } = req.body;
     
-    console.log('🔍 Updating rider online status for ID:', riderId, 'isOnline:', isOnline);
+    // Removed verbose logging
 
-    // Check Rider collection only
-    const rider = await Rider.findById(riderId);
+    // Check BOTH Rider collection and User collection
+    let rider = await Rider.findById(riderId);
+    let isOldRider = false;
+
+    if (!rider) {
+      // Try User collection for old riders
+      rider = await User.findOne({ _id: riderId, role: "rider" });
+      isOldRider = true;
+    }
 
     if (!rider) {
       return res.status(404).json({
@@ -484,25 +499,76 @@ const updateRiderOnlineStatus = async (req, res) => {
       });
     }
 
-    // Update the appropriate fields
+    // Update the appropriate fields using findByIdAndUpdate for atomic update
+    const updateData = {};
     if (isOnline !== undefined) {
-      rider.isOnline = isOnline;
+      updateData.isOnline = isOnline;
     }
     if (isAvailable !== undefined) {
-      rider.isAvailable = isAvailable;
+      updateData.isAvailable = isAvailable;
+    }
+    updateData.updatedAt = new Date();
+    
+    // Use findByIdAndUpdate for atomic update
+    let updatedRider;
+    if (isOldRider) {
+      updatedRider = await User.findByIdAndUpdate(
+        riderId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      );
+    } else {
+      updatedRider = await Rider.findByIdAndUpdate(
+        riderId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      );
     }
     
-    rider.updatedAt = new Date();
-    await rider.save();
-
-    console.log('✅ Rider online status updated:', rider.firstName || rider.fullName, 'isOnline:', rider.isOnline);
+    if (!updatedRider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found after update"
+      });
+    }
+    
+    const riderName = isOldRider ? rider.fullName : `${rider.firstName} ${rider.lastName}`;
+    console.log('✅ Rider status updated:', riderName, 'isOnline:', updatedRider.isOnline);
+    
+    // CRITICAL: Also check if rider exists in the OTHER collection by MOBILE NUMBER and update it too
+    // This ensures both collections stay in sync
+    const riderMobile = updatedRider.mobile?.toString().trim();
+    if (riderMobile) {
+      if (isOldRider) {
+        // Also check Rider collection by mobile (not just ID, in case IDs differ)
+        const riderInNewCollection = await Rider.findOne({ mobile: riderMobile });
+        if (riderInNewCollection) {
+          await Rider.findByIdAndUpdate(
+            riderInNewCollection._id,
+            { $set: updateData },
+            { new: true }
+          );
+        }
+      } else {
+        // Also check User collection by mobile
+        const riderInOldCollection = await User.findOne({ mobile: riderMobile, role: "rider" });
+        if (riderInOldCollection) {
+          await User.findByIdAndUpdate(
+            riderInOldCollection._id,
+            { $set: updateData },
+            { new: true }
+          );
+        }
+      }
+    }
+    
     res.json({
       success: true,
       message: "Rider status updated successfully",
       rider: {
-        _id: rider._id,
-        isOnline: rider.isOnline,
-        isAvailable: rider.isAvailable
+        _id: updatedRider._id,
+        isOnline: updatedRider.isOnline,
+        isAvailable: updatedRider.isAvailable
       }
     });
 
@@ -626,10 +692,17 @@ const updateRiderLocation = async (req, res) => {
     const riderId = req.user._id; // From JWT token (normalized)
     const { lat, lng, address } = req.body;
     
-    console.log('📍 Updating rider location for ID:', riderId, 'Lat:', lat, 'Lng:', lng);
+    // Removed verbose logging
 
-    // Check Rider collection
-    const rider = await Rider.findById(riderId);
+    // Check BOTH Rider collection and User collection
+    let rider = await Rider.findById(riderId);
+    let isOldRider = false;
+
+    if (!rider) {
+      // Try User collection for old riders
+      rider = await User.findOne({ _id: riderId, role: "rider" });
+      isOldRider = true;
+    }
 
     if (!rider) {
       return res.status(404).json({
@@ -638,20 +711,7 @@ const updateRiderLocation = async (req, res) => {
       });
     }
 
-    // Also update in User collection for riders that are users
-    const user = await User.findById(riderId);
-    if (user) {
-      user.currentLocation = {
-        lat,
-        lng,
-        address: address || '',
-        lastUpdated: new Date()
-      };
-      await user.save();
-      console.log('✅ Updated location in User collection');
-    }
-
-    // Update location in Rider collection
+    // Update location in the appropriate collection
     rider.currentLocation = {
       lat,
       lng,
@@ -659,8 +719,8 @@ const updateRiderLocation = async (req, res) => {
       lastUpdated: new Date()
     };
     await rider.save();
-
-    console.log('✅ Rider location updated successfully');
+    
+    // Removed verbose logging
     res.json({
       success: true,
       message: "Location updated successfully",
@@ -683,7 +743,7 @@ const updateRiderLocation = async (req, res) => {
 
 // Get all online riders with their locations (for map display) - PUBLIC ENDPOINT
 const getOnlineRiders = async (req, res) => {
-  console.log('📍 GET /api/rider/online - Public endpoint (no auth)');
+  // Removed verbose logging
 
   try {
     // Normalize vehicle type to canonical codes
@@ -752,12 +812,84 @@ const getOnlineRiders = async (req, res) => {
     const rawType = (req.query.type || req.query.vehicleType || '').toString().trim().toLowerCase();
     const allowedTypes = new Set(['bike', 'auto', 'car']);
     const typeFilter = allowedTypes.has(rawType) ? rawType : null;
-    console.log('🔎 Filters:', { type: typeFilter });
 
-    // Find all online riders first, regardless of location
-    const allOnline = await Rider.find({ isOnline: true })
-      .select('_id firstName lastName mobile vehicleType currentLocation isAvailable status')
-      .lean();
+    // CRITICAL FIX: Query ALL riders (not just online) from both collections
+    // Then deduplicate by most recent update, THEN filter by isOnline
+    // This ensures we get the most recent status for each rider
+    const allRidersFromRiderCollection = await Rider.find({})
+      .select('_id firstName lastName mobile vehicleType currentLocation isAvailable status profilePicture isOnline updatedAt createdAt')
+      .lean()
+      .read('primary');
+    
+    const allRidersFromUserCollection = await User.find({ role: "rider" })
+      .select('_id fullName mobile vehicleType currentLocation isAvailable approvalStatus profilePicture profileImage isOnline updatedAt createdAt')
+      .lean()
+      .read('primary');
+    
+    // Removed verbose logging - only log if there's an issue
+    
+    // Combine and normalize riders from both collections
+    // Use a Map to deduplicate by mobile number
+    // CRITICAL: If rider exists in both collections, prefer the one with the most recent updatedAt
+    const ridersMap = new Map();
+    
+    // First, collect all riders from both collections with their timestamps
+    const allRidersWithTimestamps = [];
+    
+    allRidersFromRiderCollection.forEach(r => {
+      const mobile = r.mobile?.toString().trim();
+      if (mobile) {
+        allRidersWithTimestamps.push({
+          ...r,
+          isOldRider: false,
+          mobile,
+          updatedAt: r.updatedAt || r.createdAt || new Date(0)
+        });
+      }
+    });
+    
+    allRidersFromUserCollection.forEach(u => {
+      const mobile = u.mobile?.toString().trim();
+      if (mobile) {
+        allRidersWithTimestamps.push({
+          _id: u._id,
+          firstName: null,
+          lastName: null,
+          fullName: u.fullName,
+          mobile: u.mobile,
+          vehicleType: u.vehicleType,
+          currentLocation: u.currentLocation,
+          isAvailable: u.isAvailable,
+          status: u.approvalStatus,
+          profilePicture: u.profilePicture || u.profileImage,
+          isOnline: u.isOnline,
+          isOldRider: true,
+          updatedAt: u.updatedAt || u.createdAt || new Date(0)
+        });
+      }
+    });
+    
+    // For each mobile number, keep only the most recently updated entry
+    allRidersWithTimestamps.forEach(rider => {
+      const mobile = rider.mobile;
+      const existing = ridersMap.get(mobile);
+      
+      if (!existing) {
+        ridersMap.set(mobile, rider);
+      } else {
+        // If rider exists in both collections, prefer the one with more recent update
+        const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const newTime = new Date(rider.updatedAt || rider.createdAt || 0).getTime();
+        
+        if (newTime > existingTime) {
+          ridersMap.set(mobile, rider);
+        }
+      }
+    });
+    
+    // Convert map to array and FILTER to only include online riders
+    const allRiders = Array.from(ridersMap.values());
+    const allOnline = allRiders.filter(r => r.isOnline === true);
 
     // Partition by location availability and normalize
     const withLocation = [];
@@ -765,13 +897,15 @@ const getOnlineRiders = async (req, res) => {
     allOnline.forEach(r => {
       const loc = extractLatLng(r);
       const vt = normalizeType(r.vehicleType);
+      const riderName = r.isOldRider ? r.fullName : `${r.firstName || ''} ${r.lastName || ''}`.trim() || 'Rider';
       const riderInfo = {
         id: r._id.toString(),
-        name: `${r.firstName || ''} ${r.lastName || ''}`.trim() || 'Rider',
+        name: riderName,
         mobile: r.mobile,
         vehicleType: vt,
         location: loc ? { lat: loc.lat, lng: loc.lng, address: r.currentLocation?.address || '' } : null,
-        isAvailable: !!r.isAvailable
+        isAvailable: !!r.isAvailable,
+        profilePicture: r.profilePicture || null
       };
       if (loc) withLocation.push(riderInfo); else withoutLocation.push(riderInfo);
     });
@@ -780,10 +914,10 @@ const getOnlineRiders = async (req, res) => {
     const filteredWithLocation = typeFilter ? withLocation.filter(r => r.vehicleType === typeFilter) : withLocation;
     const filteredWithoutLocation = typeFilter ? withoutLocation.filter(r => r.vehicleType === typeFilter) : withoutLocation;
 
-    console.log(`🚗 Online riders total: ${allOnline.length}; with location: ${withLocation.length}; without location: ${withoutLocation.length}`);
+    // Removed verbose logging
     if (filteredWithoutLocation.length > 0) {
       const missingSummary = filteredWithoutLocation.map(r => `${r.name}:${r.vehicleType}`).join(', ');
-      console.log(`⚠️ Online without location${typeFilter ? ` (type=${typeFilter})` : ''}: [ ${missingSummary} ]`);
+      // Removed verbose logging
     }
 
     // Attempt to enrich riders without location using User.currentLocation or default city center
@@ -813,7 +947,7 @@ const getOnlineRiders = async (req, res) => {
 
     const responseRiders = [...filteredWithLocation, ...enrichedFallback];
     const summary = responseRiders.map(r => `${r.name}:${r.vehicleType}`).join(', ');
-    console.log(`✅ Returning ${responseRiders.length} riders to frontend${typeFilter ? ` (type=${typeFilter})` : ''} → [ ${summary} ]`);
+    // Removed verbose logging
 
     // Log each rider with name, type, and icon separately for clearer diagnostics
     const iconForType = (tRaw) => {
@@ -827,10 +961,7 @@ const getOnlineRiders = async (req, res) => {
         default: return '🚗';
       }
     };
-    responseRiders.forEach(r => {
-      const icon = iconForType(r.vehicleType);
-      console.log(`🧑 Name: ${r.name || 'Rider'} | 🚘 Type: ${r.vehicleType} | 🔣 Icon: ${icon}`);
-    });
+    // Removed verbose logging
 
     return res.json({
       success: true,

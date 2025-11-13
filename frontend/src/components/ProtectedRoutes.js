@@ -19,7 +19,11 @@ export default function ProtectedRoute({ children, role }) {
     let mounted = true;
     const checkActive = async () => {
       try {
-        if (!token) return;
+        // Early return if no token - don't make any API calls
+        if (!token) {
+          console.log("⚠️ ProtectedRoute - No token, skipping API calls");
+          return;
+        }
         // If not a rider, ensure no lock persists and skip
         if (!isRider) {
           if (activeRideId) {
@@ -56,6 +60,11 @@ export default function ProtectedRoute({ children, role }) {
     let mounted = true;
     const verifyLock = async () => {
       try {
+        // Early return if no token - don't make any API calls
+        if (!token) {
+          console.log("⚠️ ProtectedRoute - No token, skipping lock verification");
+          return;
+        }
         // If not a rider, clear any residual lock and skip
         if (!isRider) {
           if (activeRideId) {
